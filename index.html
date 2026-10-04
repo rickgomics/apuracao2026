@@ -186,6 +186,20 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 .pr span.n.t{font-weight:700}
 table.small{min-width:420px}
 table.small td:last-child{white-space:normal;text-align:left}
+.ideo{margin-top:14px}
+.ideo .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.ideo .hd b{font:700 17px/1 var(--display)}
+.ideo .hd span{font-size:12px;color:var(--muted)}
+.ibar{position:relative;display:flex;height:30px;border-radius:7px;overflow:hidden;margin-top:6px;background:var(--surface-2)}
+.ibar i{display:flex;align-items:center;justify-content:center;font:600 13px/1 var(--mono);color:#fff;min-width:0;overflow:hidden;white-space:nowrap}
+.ibar .mid{position:absolute;left:50%;top:-3px;bottom:-3px;border-left:2px dashed var(--fg);opacity:.6}
+.ilg{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;font-size:13px}
+.ilg span{display:inline-flex;align-items:center;gap:6px}
+.ilg i{width:10px;height:10px;border-radius:3px}
+.ilg b{font-family:var(--mono)}
+:root{--esq:#b0443a;--cen:#8a7a2e;--dir:#2f5f9e;--sc:#8a93a3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--esq:#c0584e;--cen:#9c8b3a;--dir:#3f71b3;--sc:#6c7686}}
+:root[data-theme="dark"]{--esq:#c0584e;--cen:#9c8b3a;--dir:#3f71b3;--sc:#6c7686}
 footer{font-size:12px;color:var(--muted)}
 footer a{color:var(--accent)}
 </style>
@@ -294,6 +308,19 @@ footer a{color:var(--accent)}
       </div>
       <div class="progress" style="margin-top:10px"><i id="cgBar"></i></div>
       <div class="meta" id="cgMeta"></div>
+    </section>
+    <section class="panel">
+      <div class="top">
+        <div>
+          <div class="eyebrow">Projeção atual</div>
+          <h2>Esquerda, centro e direita</h2>
+        </div>
+      </div>
+      <div class="ideo" id="ideoCam"></div>
+      <div class="ideo" id="ideoSen"></div>
+      <div class="eyebrow" style="margin-top:14px">Detalhe pelas 7 faixas da escala</div>
+      <div class="tblwrap"><table class="small"><thead><tr><th>Faixa</th><th>Nota</th><th>Câmara</th><th>Senado</th><th>Partidos com cadeira</th></tr></thead><tbody id="ideoTab"></tbody></table></div>
+      <p class="note">Classificação de Bolognesi, Ribeiro e Codato, "Uma Nova Classificação Ideológica dos Partidos Políticos Brasileiros" (DADOS, 2023), com notas de 0 (esquerda) a 10 (direita) dadas por cientistas políticos. Esquerda = extrema-esquerda, esquerda e centro-esquerda; Direita = centro-direita, direita e extrema-direita. Partidos fundidos depois da pesquisa usam a média das siglas de origem (União = PSL + DEM; PRD = PTB + Patriota; Podemos absorveu PSC e PHS). Partidos que a pesquisa não avaliou ficam como "sem classificação". Outras classificações põem MDB e PSD no centro; aqui eles seguem a nota do estudo.</p>
     </section>
     <section class="panel">
       <div class="top"><h2>Senado em 2027</h2><span class="pill wrap">81 cadeiras · 54 em disputa agora (2 por estado) + 27 eleitas em 2022</span></div>
@@ -603,6 +630,44 @@ function hemicycle(seats, total, rowsN){
     : `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${dot.toFixed(1)}" fill="${s.color}"/>`; }).join("");
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${total} cadeiras">${circles}<text x="${cx}" y="${cy-8}" text-anchor="middle" font-family="var(--display)" font-weight="700" font-size="44">${total}</text><text x="${cx}" y="${cy-56}" text-anchor="middle" font-size="13" fill="var(--muted)">maioria: ${Math.floor(total/2)+1}</text></svg>`;
 }
+// ---------- escala ideológica (Bolognesi, Ribeiro & Codato, DADOS 2023) ----------
+const IDEO_SRC = {PSTU:0.51,PCO:0.61,PCB:0.91,PSOL:1.28,PCDOB:1.92,PT:2.97,PDT:3.92,PSB:4.05,REDE:4.77,CIDADANIA:4.92,PV:5.29,
+  PTB:6.1,AVANTE:6.32,SOLIDARIEDADE:6.5,MOBILIZA:6.88,PMB:6.9,MDB:7.01,PSD:7.09,PSDB:7.11,PODEMOS:7.24,REPUBLICANOS:7.78,PL:7.78,
+  DC:8.11,NOVO:8.13,PP:8.20,PSC:8.33,UNIAO:(8.11+8.57)/2,PRD:(6.1+8.55)/2};
+// faixas do estudo; PSOL, Rede e MDB seguem a faixa em que o estudo os coloca, mesmo com nota na borda
+const BANDS = [["Extrema-esquerda",0,1.5,"esq"],["Esquerda",1.5,3.0,"esq"],["Centro-esquerda",3.0,4.5,"esq"],["Centro",4.5,5.5,"cen"],["Centro-direita",5.5,7.0,"dir"],["Direita",7.0,8.5,"dir"],["Extrema-direita",8.5,10,"dir"]];
+const BAND_FIX = {PSOL:1, REDE:2, MDB:4};
+function ideoKey(sg){
+  const k=String(sg||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[^A-Z]/g,"");
+  const alias={PCDOB:"PCDOB",PCDB:"PCDOB",PODE:"PODEMOS",PHS:"PODEMOS",UNIAOBRASIL:"UNIAO",UNIAO:"UNIAO",PROGRESSISTAS:"PP",SD:"SOLIDARIEDADE",PMN:"MOBILIZA",PPS:"CIDADANIA",PRB:"REPUBLICANOS",PR:"PL",PATRIOTA:"PRD"};
+  return alias[k]||k;
+}
+function ideoOf(sg){
+  const k=ideoKey(sg); const sc=IDEO_SRC[k];
+  if(sc==null) return {band:-1,camp:"sc",score:null};
+  const b = BAND_FIX[k]!=null ? BAND_FIX[k] : BANDS.findIndex(([,lo,hi])=>sc>lo-1e-9 && sc<=hi+1e-9);
+  return {band:b,camp:BANDS[b][3],score:sc};
+}
+function renderIdeo(parties){
+  const camps={esq:"Esquerda",cen:"Centro",dir:"Direita",sc:"Sem classificação"};
+  const tot={cam:{esq:0,cen:0,dir:0,sc:0},sen:{esq:0,cen:0,dir:0,sc:0}};
+  const band=BANDS.map(()=>({cam:0,sen:0,ps:{}})); const unc={cam:0,sen:0,ps:{}};
+  parties.forEach(x=>{ const io=ideoOf(x.p); const sen=x.sen+x.sen22;
+    tot.cam[io.camp]+=x.cam; tot.sen[io.camp]+=sen;
+    const b = io.band<0 ? unc : band[io.band]; b.cam+=x.cam; b.sen+=sen; if(x.cam+sen) b.ps[x.p]=(x.cam+sen); });
+  const bar=(t,total,maj,label)=>{
+    const seg=k=>t[k]?`<i style="width:${100*t[k]/total}%;background:var(--${k})" title="${camps[k]}: ${t[k]}">${100*t[k]/total>=7?t[k]:""}</i>`:"";
+    const lead=["esq","cen","dir"].sort((a,b)=>t[b]-t[a])[0];
+    return `<div class="hd"><b>${label}</b><span>${t[lead]>=maj?`${camps[lead]} tem maioria sozinha (${maj})`:`nenhum campo chega sozinho à maioria (${maj})`}</span></div>
+      <div class="ibar">${seg("esq")}${seg("cen")}${seg("dir")}${seg("sc")}<span class="mid"></span></div>
+      <div class="ilg">${["esq","cen","dir","sc"].filter(k=>t[k]||k!=="sc").map(k=>`<span><i style="background:var(--${k})"></i>${camps[k]} <b>${t[k]}</b> <span style="color:var(--muted)">${fmtPct(100*t[k]/total,0)}</span></span>`).join("")}</div>`;
+  };
+  $("ideoCam").innerHTML=bar(tot.cam,513,257,"Câmara · 513");
+  $("ideoSen").innerHTML=bar(tot.sen,81,41,"Senado · 81");
+  const ps=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([p])=>esc(p)).join(", ")||"–";
+  $("ideoTab").innerHTML=BANDS.map(([nm,lo,hi,c],i)=>`<tr><td><span class="lead"><i style="background:var(--${c})"></i>${nm}</span></td><td class="num">${lo.toLocaleString("pt-BR")}–${hi.toLocaleString("pt-BR")}</td><td class="num">${band[i].cam}</td><td class="num">${band[i].sen}</td><td>${ps(band[i].ps)}</td></tr>`).join("")
+    + (unc.cam+unc.sen?`<tr><td><span class="lead"><i style="background:var(--sc)"></i>Sem classificação</span></td><td>–</td><td class="num">${unc.cam}</td><td class="num">${unc.sen}</td><td>${ps(unc.ps)}</td></tr>`:"");
+}
 function renderCong(){
   const cg=st.cg; if(!cg) return;
   // ---- Câmara
@@ -638,6 +703,7 @@ function renderCong(){
   $("cgHora").textContent=hg?"TSE "+hg:"";
   const totCam=parties.reduce((a,x)=>a+x.cam,0);
   $("cgMeta").innerHTML=[`Estados com dados de deputado: <b class="num">${legN}</b> de 27`,`Senado: <b class="num">${Object.keys(cg.sen).length}</b> de 27`,offEl?`Deputados já eleitos (TSE): <b class="num">${offEl}</b>`:""].filter(Boolean).map(x=>`<span>${x}</span>`).join("");
+  renderIdeo(parties);
   // hemiciclo Senado
   const senSorted=rank.filter(x=>x.sen+x.sen22>0).sort((a,b)=>(b.sen+b.sen22)-(a.sen+a.sen22));
   const senSeats=[]; senSorted.forEach(x=>{ for(let i=0;i<x.sen;i++) senSeats.push({color:colorP[x.p]}); for(let i=0;i<x.sen22;i++) senSeats.push({color:colorP[x.p],hollow:true}); });

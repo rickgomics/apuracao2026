@@ -124,6 +124,19 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 .cfgrow{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:flex-end}
 .cfgrow label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .cfgrow input,.cfgrow select{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 8px;min-width:0}
+.view{display:flex;flex-direction:column;gap:16px}
+.tabs button{padding:7px 14px;font-size:14px}
+.search{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 10px;min-width:0;flex:1 1 180px;max-width:260px}
+.tag{display:inline-block;font:600 11px/1 var(--body);padding:3px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent);margin-left:6px;vertical-align:2px;white-space:nowrap}
+.tag.muted{background:var(--surface-2);color:var(--muted)}
+.deplist{display:flex;flex-direction:column;margin-top:8px;max-height:560px;overflow-y:auto}
+.dp{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:2px 10px;align-items:baseline;padding:7px 2px;border-bottom:1px solid var(--line);font-size:14px}
+.dp .pos{font:600 12px/1 var(--mono);color:var(--muted);text-align:right}
+.dp .nm{font-weight:600;overflow-wrap:anywhere}
+.dp .nm small{font-weight:400;color:var(--muted)}
+.dp .v{text-align:right;font-size:13px;white-space:nowrap}
+.dp .v small{display:block;color:var(--muted);font-size:11px}
+.dp.cut{border-bottom:2px dashed var(--muted)}
 footer{font-size:12px;color:var(--muted)}
 footer a{color:var(--accent)}
 </style>
@@ -133,8 +146,12 @@ footer a{color:var(--accent)}
 
   <header class="top">
     <div>
-      <div class="eyebrow">Presidente · 1º turno · 4 out 2026</div>
+      <div class="eyebrow">Eleições Gerais · 1º turno · 4 out 2026</div>
       <h1>Apuração por Estado</h1>
+    </div>
+    <div class="seg tabs" role="tablist" aria-label="Disputa">
+      <button type="button" role="tab" id="tPres" aria-pressed="true">Presidente</button>
+      <button type="button" role="tab" id="tSP" aria-pressed="false">São Paulo</button>
     </div>
     <div class="status">
       <span class="pill"><span class="dot" id="dot"></span><span id="stTxt">Conectando…</span></span>
@@ -145,6 +162,56 @@ footer a{color:var(--accent)}
 
   <div id="banner" hidden></div>
 
+  <div id="viewSP" class="view" hidden>
+    <div id="bannerSP" hidden></div>
+    <section class="panel">
+      <div class="top">
+        <div>
+          <div class="eyebrow">São Paulo · votação estadual</div>
+          <h2><span class="num" id="spPst">–</span> das seções totalizadas</h2>
+        </div>
+        <div class="eyebrow" id="spHora">–</div>
+      </div>
+      <div class="progress" style="margin-top:10px"><i id="spBar"></i></div>
+      <div class="meta" id="spMeta"></div>
+    </section>
+    <div class="main">
+      <section class="panel">
+        <div class="top"><h2>Governador</h2><span class="pill">1 vaga · 2º turno se ninguém passar de 50% dos válidos</span></div>
+        <div class="cands" id="spGov"></div>
+      </section>
+      <section class="panel">
+        <div class="top"><h2>Senador</h2><span class="pill">2 vagas · os 2 mais votados</span></div>
+        <div class="cands" id="spSen"></div>
+      </section>
+    </div>
+    <section class="panel">
+      <div class="top">
+        <h2 id="depTitle">Deputados</h2>
+        <div class="seg" role="group" aria-label="Casa legislativa">
+          <button type="button" id="dFed" aria-pressed="true">Federal · 70 vagas</button>
+          <button type="button" id="dEst" aria-pressed="false">Estadual · 94 vagas</button>
+        </div>
+      </div>
+      <div class="meta" id="depMeta"></div>
+      <div class="main" style="margin-top:12px">
+        <div style="min-width:0">
+          <div class="eyebrow">Votos nominais por partido</div>
+          <div class="rank" id="depPart"></div>
+          <p class="note">Soma dos votos dados aos candidatos de cada partido. Não inclui voto de legenda, então é uma aproximação da força de cada sigla para o quociente partidário.</p>
+        </div>
+        <div style="min-width:0">
+          <div class="top">
+            <div class="eyebrow" id="depListTitle">Mais votados</div>
+            <input id="depSearch" type="search" placeholder="Buscar nome, número ou partido" aria-label="Buscar candidato" class="search">
+          </div>
+          <div class="deplist" id="depList"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="viewPres" class="view">
   <section class="panel">
     <div class="top">
       <div>
@@ -193,6 +260,7 @@ footer a{color:var(--accent)}
       <tbody id="tbody"></tbody>
     </table></div>
   </section>
+  </div>
 
   <section class="panel">
     <details class="cfg" id="cfg">
@@ -229,7 +297,7 @@ const $ = id => document.getElementById(id);
 const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
 const st = {ciclo:store.get("ap_ciclo")||"", cod:store.get("ap_cod")||"", interval:+(store.get("ap_int")||90),
-  br:null, uf:{}, demo:false, mode:"lead", cand:null, selUF:null, sort:{k:"tot",d:-1}, timer:null, next:0, busy:false, elections:[]};
+  br:null, uf:{}, sp:{}, codSP:"", cicloSP:"", cfgLoaded:false, view:"pres", dep:"df", depQ:"", demo:false, mode:"lead", cand:null, selUF:null, sort:{k:"tot",d:-1}, timer:null, next:0, busy:false, elections:[]};
 
 const pnum = v => { if(v==null) return 0; if(typeof v==="number") return v; const s=String(v).trim(); if(!s) return 0; return s.includes(",") ? parseFloat(s.replace(/\./g,"").replace(",",".")) : parseFloat(s) || 0; };
 const fmtInt = n => Math.round(n).toLocaleString("pt-BR");
@@ -258,7 +326,8 @@ function parseResult(j){
     n:String(c.n??c.nr??c.sqcand??""),
     nm:(c.nmu||c.nm||c.nmc||("Nº "+(c.n||"?"))).trim(),
     part:(c.cc||c.sgp||c._sg||"").split(" - ")[0].trim(),
-    v:pnum(c.vap??c.v), p:pnum(c.pvap??c.pv)
+    v:pnum(c.vap??c.v), p:pnum(c.pvap??c.pv),
+    el:String(c.e||"").toLowerCase()==="s", st:(c.st||"").trim(), dvt:(c.dvt||"").trim()
   })).filter(c=>c.nm);
   // achata os blocos s (seções), e (eleitorado) e v (votos) do formato unificado
   const flat = {};
@@ -287,11 +356,15 @@ async function loadConfig(){
     // o campo "c" do config pode ficar desatualizado; o ciclo vem do ano do pleito
     const ciclo = ano ? "ele"+ano : (j.c||"");
     const pres = (e.abr||[]).some(a=>(a.cp||[]).some(c=>String(c.cd)==="1"));
+    const sp = (e.abr||[]).some(a=>["sp","br"].includes(String(a.cd).toLowerCase()) && (a.cp||[]).some(c=>String(c.cd)==="3"));
     const [d,m,y] = dt.split("/").map(Number);
     const dist = y ? Math.abs(new Date(y,m-1,d) - new Date()) : 9e15;
-    list.push({cd:String(e.cd), nm:(e.nm||("Eleição "+e.cd)).replace(/&#186;/g,"º"), t:String(e.t||""), dt, ciclo, pres, dist});
+    list.push({cd:String(e.cd), nm:(e.nm||("Eleição "+e.cd)).replace(/&#186;/g,"º"), t:String(e.t||""), dt, ciclo, pres, sp, dist});
   }));
   st.elections = list;
+  const spE = list.filter(e=>e.sp).sort((a,b)=>a.dist-b.dist)[0];
+  if(spE){ st.codSP = spE.cd; st.cicloSP = spE.ciclo; }
+  st.cfgLoaded = true;
   const sel=$("selEle"); sel.innerHTML="";
   list.filter(e=>e.pres).concat(list.filter(e=>!e.pres)).forEach(e=>{const o=document.createElement("option");o.value=e.cd;o.textContent=`${e.cd} · ${e.nm}${e.dt?" · "+e.dt:""}`;sel.appendChild(o)});
   if(!st.cod){
@@ -308,11 +381,27 @@ async function loadConfig(){
 
 // 2026 pode publicar o resultado por UF no formato simplificado (-r) ou no unificado (-u); testa os dois
 const VARIANTS = [
-  (uf,cod)=>`${BASE}/${st.ciclo}/${cod}/dados-simplificados/${uf}/${uf}-c0001-e${cod.padStart(6,"0")}-r.json`,
-  (uf,cod)=>`${BASE}/${st.ciclo}/${cod}/dados/${uf}/${uf}-c0001-e${cod.padStart(6,"0")}-u.json`
+  (ciclo,cod,uf,cg)=>`${BASE}/${ciclo}/${cod}/dados-simplificados/${uf}/${uf}-c${cg}-e${cod.padStart(6,"0")}-r.json`,
+  (ciclo,cod,uf,cg)=>`${BASE}/${ciclo}/${cod}/dados/${uf}/${uf}-c${cg}-e${cod.padStart(6,"0")}-u.json`
 ];
-let variant = null;
-const urlFor = (uf,vi) => VARIANTS[vi ?? variant ?? 0](uf,String(st.cod));
+let variant = null, variantSP = null;
+const urlFor = (uf,vi) => VARIANTS[vi ?? variant ?? 0](st.ciclo,String(st.cod),uf,"0001");
+const urlSP = (cargo,vi) => VARIANTS[vi ?? variantSP ?? 0](st.cicloSP,String(st.codSP),"sp",String(cargo).padStart(4,"0"));
+async function getSP(cargo){
+  if(variantSP!=null) return getJSON(urlSP(cargo));
+  let last;
+  for(let i=0;i<VARIANTS.length;i++){
+    try{ const j=await getJSON(urlSP(cargo,i)); variantSP=i; return j; }catch(e){ last=e; }
+  }
+  throw last;
+}
+const SP_CARGOS = {gov:3, sen:5, df:6, de:7};
+async function refreshSP(){
+  if(!st.codSP) throw new Error("o TSE ainda não listou a eleição estadual de SP no arquivo de configuração");
+  st.sp.gov = parseResult(await getSP(SP_CARGOS.gov));
+  const rest = await Promise.allSettled(["sen","df","de"].map(k=>getSP(SP_CARGOS[k])));
+  ["sen","df","de"].forEach((k,i)=>{ if(rest[i].status==="fulfilled") st.sp[k]=parseResult(rest[i].value); });
+}
 
 async function getJSON(u){
   const r = await fetch(u,{cache:"no-store"});
@@ -339,8 +428,23 @@ function sumUFs(){
 async function refresh(){
   if(st.busy||st.demo) return;
   st.busy=true; setStatus("Buscando dados…","");
+  let okPres=false, okSP=false;
   try{
-    if(!st.ciclo||!st.cod) await loadConfig();
+    if(!st.cfgLoaded) await loadConfig();
+  }catch(err){
+    setStatus("Sem conexão com o TSE","err");
+    showBanner("err","Não consegui ler a configuração do TSE","Detalhe: "+esc(err.message)+". O painel tenta de novo sozinho.");
+    st.busy=false; schedule(); return;
+  }
+  // São Paulo (governador, senador, deputados) — independente do bloco presidencial
+  try{
+    await refreshSP(); okSP=true; $("bannerSP").hidden=true;
+  }catch(err){
+    const b=$("bannerSP"); b.className="banner err"; b.hidden=false;
+    b.innerHTML=`<strong>Não consegui ler os dados de São Paulo</strong>Detalhe: ${esc(err.message)}${err.url?` em <span class="num" style="overflow-wrap:anywhere">${esc(err.url)}</span>`:""}. Ciclo: <b>${esc(st.cicloSP||"–")}</b>, código: <b>${esc(st.codSP||"–")}</b>. O painel tenta de novo sozinho.`;
+  }
+  renderSP();
+  try{
     // SP primeiro para descobrir o formato do arquivo; depois os demais em lotes de 7
     let firstErr=null;
     try{ st.uf.sp = parseResult(await getUF("sp")); }catch(e){ firstErr=e; }
@@ -355,11 +459,9 @@ async function refresh(){
     try{ br = parseResult(await getJSON(urlFor("br"))); if(!br.cands.length) br=null; }catch(e){}
     st.br = br || sumUFs();
     $("srcUrl").textContent = "Arquivo usado (SP): "+urlFor("sp")+(st.br.somado?" · total nacional = soma dos estados":"");
-    hideBanner();
-    setStatus("Ao vivo","live");
+    hideBanner(); okPres=true;
     render();
   }catch(err){
-    setStatus("Sem conexão com o TSE","err");
     showBanner("err","Não consegui ler os dados do TSE",
       (location.protocol==="file:"||/Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? "O navegador bloqueou a leitura direta (rede ou política de acesso do site). Abra este arquivo no Chrome ou Safari de um computador conectado, ou peça para publicar numa página. Enquanto isso, dá para explorar com dados de exemplo."
@@ -367,7 +469,12 @@ async function refresh(){
       + ' <button class="btn" type="button" id="bDemo2" style="margin-top:8px">Ver com dados de exemplo</button>');
     const b=$("bDemo2"); if(b) b.onclick=startDemo;
     if(!st.br) render();
-  }finally{ st.busy=false; schedule(); }
+  }finally{
+    if(okPres&&okSP) setStatus("Ao vivo","live");
+    else if(okPres||okSP) setStatus("Ao vivo (parcial)","live");
+    else setStatus("Sem conexão com o TSE","err");
+    st.busy=false; schedule();
+  }
 }
 
 function schedule(){
@@ -389,7 +496,7 @@ function startDemo(){
   st.demo=true; clearInterval(st.timer); $("cd").textContent="pausado";
   setStatus("Dados de exemplo","");
   showBanner("demo","Dados de exemplo, não oficiais","Candidatos e números fictícios só para mostrar o painel funcionando. <button class=\"btn\" type=\"button\" id=\"bLive\" style=\"margin-top:8px\">Voltar para dados do TSE</button>");
-  $("bLive").onclick=()=>{st.demo=false;st.br=null;st.uf={};hideBanner();refresh();};
+  $("bLive").onclick=()=>{st.demo=false;st.br=null;st.uf={};st.sp={};hideBanner();refresh();};
   const names=[["Candidato A","10","PART-A"],["Candidata B","20","PART-B"],["Candidato C","30","PART-C"],["Candidata D","40","PART-D"],["Candidato E","50","PART-E"]];
   const elec = {sp:34.4,mg:16.3,rj:12.8,ba:11.3,pr:8.6,rs:8.6,pe:7.0,ce:6.8,pa:6.2,sc:5.6,go:4.9,ma:4.9,pb:3.0,am:2.7,es:2.9,rn:2.5,al:2.3,pi:2.6,mt:2.5,df:2.2,ms:2.0,se:1.7,ro:1.2,to:1.1,ac:0.6,ap:0.6,rr:0.4,zz:0.7};
   let seed=7; const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};
@@ -407,6 +514,15 @@ function startDemo(){
   });
   const vvt=tot.reduce((a,b)=>a+b,0);
   st.br={cands:names.map((n,i)=>({n:n[1],nm:n[0],part:n[2],v:tot[i],p:100*tot[i]/vvt})),pst:81.37,vv:vvt,vb:vvt*.02,vn:vvt*.03,e:156e6,c:156e6*.79*.81,pc:79.1,a:0,pa:20.9,hg:"exemplo"};
+  // São Paulo fictício
+  const vvSP=34.4e6*.78*.8;
+  const maj=(n,ws,base)=>{const s=ws.reduce((a,b)=>a+b,0);return {cands:ws.map((w,i)=>({n:String(base+i*11),nm:`${n} ${String.fromCharCode(65+i)}`,part:"PART-"+String.fromCharCode(65+i),v:vvSP*w/s,p:100*w/s,el:false,st:"",dvt:""})),pst:80.2,vv:vvSP,vb:0,vn:0,e:34.4e6,c:0,pc:79.4,a:0,pa:20.6,hg:"exemplo"};};
+  st.sp.gov=maj("Candidato",[38,31,17,8,4,2],10);
+  st.sp.sen=maj("Candidata",[24,22,19,15,10,6,4],100);
+  const dep=(k,qt,base)=>{const cs=[];for(let i=0;i<qt;i++){const w=Math.pow(rnd(),3)*(i<5?8:1);cs.push({n:String(base+i),nm:"Candidato "+(base+i),part:"PART-"+String.fromCharCode(65+Math.floor(rnd()*9)),v:w,p:0,el:false,st:"",dvt:""});}
+    const s=cs.reduce((a,c)=>a+c.v,0);cs.forEach(c=>{c.v=vvSP*.9*c.v/s;c.p=100*c.v/vvSP;});return {cands:cs,pst:80.2,vv:vvSP,e:34.4e6,hg:"exemplo"};};
+  st.sp.df=dep("df",400,1000); st.sp.de=dep("de",600,10000);
+  $("bannerSP").hidden=true; renderSP();
   render();
 }
 
@@ -532,10 +648,93 @@ function renderTable(cs){
 
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 
+// ---------- São Paulo ----------
+const statusTag = c => {
+  const s=c.st; if(!s||/^não eleito$/i.test(s)||/^-+$/.test(s)) return "";
+  return `<span class="tag">${esc(s)}</span>`;
+};
+function majoritario(el, d, vagas){
+  if(!d||!d.cands.length){ $(el).innerHTML='<p class="note">Aguardando o primeiro arquivo do TSE para este cargo.</p>'; return; }
+  const cs=d.cands.slice().sort((a,b)=>b.v-a.v);
+  const top=cs.slice(0,6);
+  $(el).innerHTML = top.map((c,i)=>`<div class="crow">
+      <span class="nm">${esc(c.nm)} <small>${esc(c.n)}${c.part?" · "+esc(c.part):""}</small>${statusTag(c)}</span>
+      <span class="pc num">${fmtPct(c.p)}</span>
+      <span class="bar"><i style="width:${Math.min(100,c.p)}%;background:var(--c${Math.min(i+1,8)});${i>=vagas?"opacity:.55":""}"></i></span>
+      <span class="vt num">${fmtInt(c.v)} votos${i===vagas-1&&cs[vagas]?` · ${fmtInt(c.v-cs[vagas].v)} à frente do ${vagas+1}º`:""}</span></div>`).join("")
+    + (cs.length>6?`<div class="note">+ ${cs.length-6} candidatos com menos votos</div>`:"");
+}
+function renderSP(){
+  const g=st.sp.gov||st.sp.sen||st.sp.df;
+  if(g){
+    $("spPst").textContent=fmtPct(g.pst);
+    $("spBar").style.width=Math.min(100,g.pst)+"%";
+    $("spHora").textContent=g.hg?"TSE "+g.hg:"";
+    $("spMeta").innerHTML=[
+      g.pc?`Comparecimento: <b class="num">${fmtPct(g.pc)}</b>`:"",
+      g.pa?`Abstenção: <b class="num">${fmtPct(g.pa)}</b>`:"",
+      g.e?`Eleitorado: <b class="num">${fmtInt(g.e)}</b>`:""
+    ].filter(Boolean).map(s=>`<span>${s}</span>`).join("");
+  }
+  majoritario("spGov", st.sp.gov, 1);
+  majoritario("spSen", st.sp.sen, 2);
+  renderDep();
+}
+function renderDep(){
+  const fed = st.dep==="df"; const d = st.sp[st.dep]; const vagas = fed?70:94;
+  $("dFed").setAttribute("aria-pressed",fed); $("dEst").setAttribute("aria-pressed",!fed);
+  $("depTitle").textContent = fed?"Deputados federais":"Deputados estaduais";
+  if(!d||!d.cands.length){
+    $("depPart").innerHTML=""; $("depMeta").innerHTML="";
+    $("depList").innerHTML='<p class="note">Aguardando o primeiro arquivo do TSE para este cargo.</p>'; return;
+  }
+  const cs=d.cands.filter(c=>!/anulad|indefer|cassad/i.test(c.dvt)).sort((a,b)=>b.v-a.v);
+  const nom = cs.reduce((a,c)=>a+c.v,0)||1;
+  const eleitos = cs.filter(c=>c.el).length;
+  $("depMeta").innerHTML=[
+    `Apurado: <b class="num">${fmtPct(d.pst)}</b>`,
+    `Votos válidos: <b class="num">${fmtInt(d.vv)}</b>`,
+    d.vv?`Quociente eleitoral estimado: <b class="num">${fmtInt(d.vv/vagas)}</b>`:"",
+    eleitos?`Eleitos definidos: <b class="num">${eleitos}</b> de ${vagas}`:""
+  ].filter(Boolean).map(s=>`<span>${s}</span>`).join("");
+  // partidos
+  const byP={}; cs.forEach(c=>{const p=c.part||"Sem partido"; (byP[p] ||= {v:0,n:0,el:0}); byP[p].v+=c.v; byP[p].n++; if(c.el) byP[p].el++;});
+  const parts=Object.entries(byP).sort((a,b)=>b[1].v-a[1].v);
+  const max=parts[0]?.[1].v||1;
+  $("depPart").innerHTML=parts.slice(0,14).map(([p,x])=>`<div class="rk" style="grid-template-columns:minmax(70px,auto) minmax(0,1fr) auto">
+      <span class="uf" style="font-size:14px">${esc(p)}</span>
+      <span class="b"><i style="width:${100*x.v/max}%;background:var(--accent)"></i></span>
+      <span class="v num">${fmtPct(100*x.v/nom,1)} · ${fmtK(x.v)}<small>${x.n} candidatos${x.el?` · ${x.el} eleitos`:""}</small></span></div>`).join("")
+    + (parts.length>14?`<div class="note">Outros ${parts.length-14} partidos somam ${fmtPct(100*parts.slice(14).reduce((a,[,x])=>a+x.v,0)/nom,1)}.</div>`:"");
+  // lista
+  const q=st.depQ.trim().toLowerCase();
+  const ranked=cs.map((c,i)=>({...c,pos:i+1}));
+  const list = q ? ranked.filter(c=>(c.nm+" "+c.n+" "+c.part).toLowerCase().includes(q)).slice(0,100) : ranked.slice(0,vagas);
+  $("depListTitle").textContent = q ? `${list.length} resultado(s) para "${st.depQ.trim()}"` : `${vagas} mais votados (tamanho da bancada)`;
+  $("depList").innerHTML = list.length ? list.map(c=>`<div class="dp">
+      <span class="pos">${c.pos}º</span>
+      <span class="nm">${esc(c.nm)} <small>${esc(c.n)} · ${esc(c.part)}</small>${c.el?statusTag(c)||'<span class="tag">Eleito</span>':""}</span>
+      <span class="v num">${fmtInt(c.v)}<small>${fmtPct(c.p)}</small></span></div>`).join("")
+    : '<p class="note">Nenhum candidato encontrado.</p>';
+}
+function setView(v){
+  st.view=v;
+  $("tPres").setAttribute("aria-pressed",v==="pres"); $("tSP").setAttribute("aria-pressed",v==="sp");
+  $("viewPres").hidden = v!=="pres"; $("viewSP").hidden = v!=="sp";
+  try{ history.replaceState(null,"",v==="sp"?"#sp":"#"); }catch(e){}
+  store.set("ap_view",v);
+}
+$("tPres").onclick=()=>setView("pres");
+$("tSP").onclick=()=>setView("sp");
+$("dFed").onclick=()=>{st.dep="df"; renderDep();};
+$("dEst").onclick=()=>{st.dep="de"; renderDep();};
+$("depSearch").oninput=e=>{st.depQ=e.target.value; renderDep();};
+setView(location.hash==="#sp" ? "sp" : (store.get("ap_view")||"pres"));
+
 function setMode(m){ st.mode=m; $("mLead").setAttribute("aria-pressed",m==="lead"); $("mCand").setAttribute("aria-pressed",m==="cand"); render(); }
 $("mLead").onclick=()=>setMode("lead");
 $("mCand").onclick=()=>setMode("cand");
-$("btnRefresh").onclick=()=>{ if(st.demo){st.demo=false;st.br=null;st.uf={};hideBanner();} refresh(); };
+$("btnRefresh").onclick=()=>{ if(st.demo){st.demo=false;st.br=null;st.uf={};st.sp={};hideBanner();} refresh(); };
 $("btnDemo").onclick=startDemo;
 $("selEle").onchange=e=>{$("inCod").value=e.target.value};
 $("btnApply").onclick=()=>{

@@ -144,6 +144,12 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 .dp .v{text-align:right;font-size:13px;white-space:nowrap}
 .dp .v small{display:block;color:var(--muted);font-size:11px}
 .dp.cut{border-bottom:2px dashed var(--muted)}
+.munsearch{position:relative;flex:1 1 200px;max-width:280px;display:flex}
+.munsearch .search{max-width:none;width:100%}
+.munhits{position:absolute;top:100%;left:0;right:0;z-index:5;margin-top:4px;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.12)}
+.munhits button{display:block;width:100%;text-align:left;border:0;background:none;padding:9px 12px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--line)}
+.munhits button:last-child{border-bottom:0}
+.munhits button:hover,.munhits button:focus-visible{background:var(--surface-2);outline:none}
 .prk{display:grid;grid-template-columns:minmax(0,110px) minmax(0,1fr) 92px;gap:2px 10px;align-items:center;padding:5px 0}
 .prk .sg{font:700 15px/1.1 var(--display);overflow-wrap:anywhere}
 .prk .b{height:9px;border-radius:5px;background:var(--surface-2);overflow:hidden}
@@ -219,16 +225,22 @@ footer a{color:var(--accent)}
     <section class="panel">
       <div class="top">
         <div>
-          <div class="eyebrow">Município de São Paulo (capital)</div>
-          <h2><span class="num" id="capPst">–</span> das seções totalizadas na capital</h2>
+          <div class="eyebrow">Por município · <span id="munCount">645 cidades</span></div>
+          <h2 id="munName">São Paulo</h2>
+        </div>
+        <div class="munsearch">
+          <input id="munQ" type="search" placeholder="Buscar cidade de SP" aria-label="Buscar município" autocomplete="off" class="search">
+          <div class="munhits" id="munHits" hidden></div>
         </div>
       </div>
-      <div class="progress" style="margin-top:10px"><i id="capBar"></i></div>
+      <div class="chips" id="munChips"></div>
+      <div class="eyebrow" style="margin-top:8px"><span class="num" id="capPst">–</span> das seções totalizadas na cidade</div>
+      <div class="progress" style="margin-top:6px"><i id="capBar"></i></div>
       <div class="main" style="margin-top:14px">
-        <div style="min-width:0"><div class="eyebrow">Presidente na capital</div><div class="cands" id="capPres"></div></div>
-        <div style="min-width:0"><div class="eyebrow">Governador na capital</div><div class="cands" id="capGov"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Presidente na cidade</div><div class="cands" id="capPres"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Governador na cidade</div><div class="cands" id="capGov"></div></div>
       </div>
-      <p class="note">Compare com o resultado do estado acima: a diferença mostra o peso da capital contra o interior.</p>
+      <p class="note">Compare com o resultado do estado acima para ver como a cidade se diferencia do total.</p>
     </section>
     <section class="panel">
       <div class="top">
@@ -360,7 +372,7 @@ const $ = id => document.getElementById(id);
 const store = {get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 
 const st = {ciclo:store.get("ap_ciclo")||"", cod:store.get("ap_cod")||"", interval:+(store.get("ap_int")||90),
-  br:null, uf:{}, sp:{}, codSP:"", cicloSP:"", cfgLoaded:false, view:"pres", dep:"df", depQ:"", demo:false, mode:"lead", cand:null, selUF:null, sort:{k:"tot",d:-1}, timer:null, next:0, busy:false, elections:[]};
+  br:null, uf:{}, sp:{}, muns:[], mun:store.get("ap_mun")||"71072", codSP:"", cicloSP:"", cfgLoaded:false, view:"pres", dep:"df", depQ:"", demo:false, mode:"lead", cand:null, selUF:null, sort:{k:"tot",d:-1}, timer:null, next:0, busy:false, elections:[]};
 
 const pnum = v => { if(v==null) return 0; if(typeof v==="number") return v; const s=String(v).trim(); if(!s) return 0; return s.includes(",") ? parseFloat(s.replace(/\./g,"").replace(",",".")) : parseFloat(s) || 0; };
 const fmtInt = n => Math.round(n).toLocaleString("pt-BR");
@@ -501,15 +513,63 @@ async function refreshSP(){
   st.sp.gov = parseResult(await getSP(SP_CARGOS.gov));
   const rest = await Promise.allSettled(["sen","df","de"].map(k=>getSP(SP_CARGOS[k])));
   ["sen","df","de"].forEach((k,i)=>{ if(rest[i].status==="fulfilled") st.sp[k]=parseResult(rest[i].value); });
-  // capital (código TSE 71072): arquivo unificado por município
-  const mun=(ciclo,cod,cg)=>`${BASE}/${ciclo}/${cod}/dados/sp/sp71072-c${String(cg).padStart(4,"0")}-e${String(cod).padStart(6,"0")}-u.json`;
-  const cap = await Promise.allSettled([
-    st.cod ? getJSON(mun(st.ciclo,st.cod,1)) : Promise.reject(new Error("sem código")),
-    getJSON(mun(st.cicloSP,st.codSP,3))
-  ]);
-  if(cap[0].status==="fulfilled") st.sp.capPres=parseResult(cap[0].value);
-  if(cap[1].status==="fulfilled") st.sp.capGov=parseResult(cap[1].value);
+  if(!st.muns.length) await loadMuns();
+  await fetchMun();
 }
+// ---------- municípios ----------
+const BIG = ["SÃO PAULO","GUARULHOS","CAMPINAS","SÃO BERNARDO DO CAMPO","SANTO ANDRÉ","OSASCO","SÃO JOSÉ DOS CAMPOS","RIBEIRÃO PRETO","SOROCABA","SANTOS"];
+const norm = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim();
+async function loadMuns(){
+  const tries=[[st.cicloSP,st.codSP],[st.ciclo,st.cod]].filter(([c,d])=>c&&d);
+  for(const [ciclo,cod] of tries){
+    try{
+      const j=await getJSON(`${BASE}/${ciclo}/${cod}/config/mun-e${String(cod).padStart(6,"0")}-cm.json`);
+      const abr=(j.abr||[]).find(a=>String(a.cd).toLowerCase()==="sp");
+      if(abr&&abr.mu&&abr.mu.length){ st.muns=abr.mu.map(m=>({cd:String(m.cd),nm:m.nm,cap:m.c==="S",z:(m.z||[]).length})).sort((a,b)=>a.nm.localeCompare(b.nm,"pt-BR")); break; }
+    }catch(e){}
+  }
+  if(!st.muns.length) st.muns=[{cd:"71072",nm:"SÃO PAULO",cap:true}];
+  renderMunChips();
+}
+async function fetchMun(){
+  const cd=st.mun; const cod6=c=>String(c).padStart(6,"0");
+  const u=(ciclo,cod,cg)=>`${BASE}/${ciclo}/${cod}/dados/sp/sp${cd}-c${String(cg).padStart(4,"0")}-e${cod6(cod)}-u.json`;
+  const r = await Promise.allSettled([
+    st.cod ? getJSON(u(st.ciclo,st.cod,1)) : Promise.reject(new Error("sem código")),
+    getJSON(u(st.cicloSP,st.codSP,3))
+  ]);
+  if(cd!==st.mun) return; // usuário trocou de cidade no meio da busca
+  st.sp.capPres = r[0].status==="fulfilled" ? parseResult(r[0].value) : null;
+  st.sp.capGov  = r[1].status==="fulfilled" ? parseResult(r[1].value) : null;
+}
+const munName = cd => { const m=st.muns.find(x=>x.cd===cd); return m?m.nm:"São Paulo"; };
+const title = t => t.toLowerCase().replace(/(^|\s)(\p{L})/gu,(a,b,c)=>b+c.toUpperCase()).replace(/\s(De|Do|Da|Dos|Das|E)\s/g,m=>m.toLowerCase());
+function renderMunChips(){
+  const big=BIG.map(n=>st.muns.find(m=>norm(m.nm)===norm(n))).filter(Boolean);
+  $("munChips").innerHTML=big.map(m=>`<button type="button" class="chip" data-cd="${m.cd}" aria-pressed="${m.cd===st.mun}">${esc(title(m.nm))}</button>`).join("");
+  $("munChips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>selectMun(b.dataset.cd));
+  $("munCount").textContent = st.muns.length>1 ? `${st.muns.length} cidades` : "";
+}
+async function selectMun(cd){
+  st.mun=cd; store.set("ap_mun",cd);
+  $("munQ").value=""; $("munHits").hidden=true;
+  renderMunChips();
+  st.sp.capPres=st.sp.capGov=null; renderSP();
+  $("capPres").innerHTML=$("capGov").innerHTML='<p class="note">Buscando…</p>';
+  if(st.demo){ st.sp.capPres=demoMun(1); st.sp.capGov=demoMun(3); renderSP(); return; }
+  try{ await fetchMun(); }catch(e){}
+  renderSP();
+}
+$("munQ").oninput=e=>{
+  const q=norm(e.target.value); const h=$("munHits");
+  if(q.length<2){ h.hidden=true; return; }
+  const hits=st.muns.filter(m=>norm(m.nm).includes(q)).sort((a,b)=>norm(a.nm).indexOf(q)-norm(b.nm).indexOf(q)).slice(0,8);
+  h.innerHTML = hits.length ? hits.map(m=>`<button type="button" data-cd="${m.cd}">${esc(title(m.nm))}</button>`).join("") : '<button type="button" disabled>Nenhuma cidade encontrada</button>';
+  h.querySelectorAll("button[data-cd]").forEach(b=>b.onclick=()=>selectMun(b.dataset.cd));
+  h.hidden=false;
+};
+$("munQ").onkeydown=e=>{ if(e.key==="Enter"){ const b=$("munHits").querySelector("button[data-cd]"); if(b){ e.preventDefault(); b.click(); } } if(e.key==="Escape") $("munHits").hidden=true; };
+document.addEventListener("click",e=>{ if(!e.target.closest(".munsearch")) $("munHits").hidden=true; });
 
 async function getJSON(u){
   const r = await fetch(u,{cache:"no-store"});
@@ -630,7 +690,9 @@ function startDemo(){
   const dep=(k,qt,base)=>{const cs=[];for(let i=0;i<qt;i++){const w=Math.pow(rnd(),3)*(i<5?8:1);cs.push({n:String(base+i),nm:"Candidato "+(base+i),part:"PART-"+String.fromCharCode(65+Math.floor(rnd()*9)),v:w,p:0,el:false,st:"",dvt:""});}
     const s=cs.reduce((a,c)=>a+c.v,0);cs.forEach(c=>{c.v=vvSP*.9*c.v/s;c.p=100*c.v/vvSP;});return {cands:cs,pst:80.2,vv:vvSP,e:34.4e6,hg:"exemplo"};};
   st.sp.df=dep("df",400,1000); st.sp.de=dep("de",600,10000);
-  st.sp.capPres=maj("Candidato",[33,36,19,8,4],10); st.sp.capGov=maj("Candidato",[30,40,18,8,4],10); st.sp.capPres.pst=st.sp.capGov.pst=74.5;
+  st.muns=[{cd:"71072",nm:"SÃO PAULO",cap:true},{cd:"64777",nm:"GUARULHOS"},{cd:"62910",nm:"CAMPINAS"},{cd:"70750",nm:"SÃO BERNARDO DO CAMPO"},{cd:"70572",nm:"SANTO ANDRÉ"},{cd:"66940",nm:"OSASCO"},{cd:"70718",nm:"SANTOS"},{cd:"69698",nm:"RIBEIRÃO PRETO"}];
+  window.demoMun=(cg)=>{ const h=[...st.mun].reduce((a,c)=>a+c.charCodeAt(0),0); const w=[30+h%9,34-h%7,18,9,4]; const r=maj("Candidato",cg===1?w:[w[1],w[0],18,8,4],10); r.pst=60+h%35; return r; };
+  st.sp.capPres=demoMun(1); st.sp.capGov=demoMun(3); renderMunChips();
   $("bannerSP").hidden=true; renderSP();
   render();
 }
@@ -850,6 +912,7 @@ function renderSP(){
   majoritario("spGov", st.sp.gov, 1);
   majoritario("capPres", st.sp.capPres, 1);
   majoritario("capGov", st.sp.capGov, 1);
+  $("munName").textContent = title(munName(st.mun));
   const cp=st.sp.capGov||st.sp.capPres;
   $("capPst").textContent = cp?fmtPct(cp.pst):"–"; $("capBar").style.width=(cp?Math.min(100,cp.pst):0)+"%";
   majoritario("spSen", st.sp.sen, 2);

@@ -187,6 +187,13 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 table.small{min-width:420px}
 table.small td:last-child{white-space:normal;text-align:left}
 .ideo{margin-top:14px}
+.grp{display:flex;flex-direction:column;margin-top:6px}
+.gr{display:grid;grid-template-columns:12px minmax(0,1fr) auto auto;gap:3px 12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.gr .sw{width:12px;height:12px;border-radius:3px}
+.gr .nm{font-weight:600}
+.gr .n{font-size:12px;color:var(--muted);white-space:nowrap}
+.gr .n b{font:600 14px var(--mono);color:var(--fg)}
+.gr .ps{grid-column:2/-1;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
 .ideo .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 .ideo .hd b{font:700 17px/1 var(--display)}
 .ideo .hd span{font-size:12px;color:var(--muted)}
@@ -197,9 +204,9 @@ table.small td:last-child{white-space:normal;text-align:left}
 .ilg span{display:inline-flex;align-items:center;gap:6px}
 .ilg i{width:10px;height:10px;border-radius:3px}
 .ilg b{font-family:var(--mono)}
-:root{--esq:#b0443a;--cen:#8a7a2e;--dir:#2f5f9e;--sc:#8a93a3}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--esq:#c0584e;--cen:#9c8b3a;--dir:#3f71b3;--sc:#6c7686}}
-:root[data-theme="dark"]{--esq:#c0584e;--cen:#9c8b3a;--dir:#3f71b3;--sc:#6c7686}
+:root{--esq:#b0443a;--cen:#8a7a2e;--ctr:#6b5aa6;--dir:#2f5f9e;--sc:#8a93a3}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--esq:#c0584e;--cen:#9c8b3a;--ctr:#8170c4;--dir:#3f71b3;--sc:#6c7686}}
+:root[data-theme="dark"]{--esq:#c0584e;--cen:#9c8b3a;--ctr:#8170c4;--dir:#3f71b3;--sc:#6c7686}
 footer{font-size:12px;color:var(--muted)}
 footer a{color:var(--accent)}
 </style>
@@ -313,14 +320,16 @@ footer a{color:var(--accent)}
       <div class="top">
         <div>
           <div class="eyebrow">Projeção atual</div>
-          <h2>Esquerda, centro e direita</h2>
+          <h2>Esquerda, centro, Centrão e direita</h2>
         </div>
       </div>
       <div class="ideo" id="ideoCam"></div>
       <div class="ideo" id="ideoSen"></div>
-      <div class="eyebrow" style="margin-top:14px">Detalhe pelas 7 faixas da escala</div>
-      <div class="tblwrap"><table class="small"><thead><tr><th>Faixa</th><th>Nota</th><th>Câmara</th><th>Senado</th><th>Partidos com cadeira</th></tr></thead><tbody id="ideoTab"></tbody></table></div>
-      <p class="note">Classificação de Bolognesi, Ribeiro e Codato, "Uma Nova Classificação Ideológica dos Partidos Políticos Brasileiros" (DADOS, 2023), com notas de 0 (esquerda) a 10 (direita) dadas por cientistas políticos. Esquerda = extrema-esquerda, esquerda e centro-esquerda; Direita = centro-direita, direita e extrema-direita. Partidos fundidos depois da pesquisa usam a média das siglas de origem (União = PSL + DEM; PRD = PTB + Patriota; Podemos absorveu PSC e PHS). Partidos que a pesquisa não avaliou ficam como "sem classificação". Outras classificações põem MDB e PSD no centro; aqui eles seguem a nota do estudo.</p>
+      <div class="eyebrow" style="margin-top:16px">Quem forma maioria com o Centrão</div>
+      <div class="kpis" id="ideoCombo"></div>
+      <div class="eyebrow" style="margin-top:16px">Partidos em cada grupo</div>
+      <div class="grp" id="ideoTab"></div>
+      <p class="note"><b>Centrão</b>: partidos que costumam apoiar o governo da vez em troca de espaço (ministérios, emendas), independentemente de quem governa: PP, União Brasil, Republicanos, PSD, MDB, Podemos, Solidariedade e Avante. É a soma das listas de reportagens de julho de 2026 (Estado de Minas e CNN Brasil). O PL fica fora porque em 2026 é o principal partido de oposição, com candidato próprio. O bloco não tem lista oficial e muda a cada legislatura.<br><br><b>Demais partidos</b>: escala de Bolognesi, Ribeiro e Codato (DADOS, 2023), de 0 (esquerda) a 10 (direita), feita com avaliações de cientistas políticos. Esquerda vai até a centro-esquerda (nota até 4,5); Centro vai de 4,5 a 5,5; Direita, acima disso. Partidos fundidos usam a média das siglas de origem (PRD = PTB + Patriota). Siglas que o estudo não avaliou ficam "sem classificação".</p>
     </section>
     <section class="panel">
       <div class="top"><h2>Senado em 2027</h2><span class="pill wrap">81 cadeiras · 54 em disputa agora (2 por estado) + 27 eleitas em 2022</span></div>
@@ -648,26 +657,37 @@ function ideoOf(sg){
   const b = BAND_FIX[k]!=null ? BAND_FIX[k] : BANDS.findIndex(([,lo,hi])=>sc>lo-1e-9 && sc<=hi+1e-9);
   return {band:b,camp:BANDS[b][3],score:sc};
 }
+// Centrão: apoia o governo da vez (Estado de Minas 24/07/2026 + CNN Brasil 28/07/2026; PL excluído por ser oposição em 2026)
+const CENTRAO = new Set(["PP","UNIAO","REPUBLICANOS","PSD","MDB","PODEMOS","SOLIDARIEDADE","AVANTE"]);
+function campOf(sg){
+  const k=ideoKey(sg);
+  if(CENTRAO.has(k)) return "ctr";
+  const io=ideoOf(sg); if(io.score==null) return "sc";
+  return io.score<=4.5||k==="REDE" ? "esq" : io.score<=5.5 ? "cen" : "dir";
+}
 function renderIdeo(parties){
-  const camps={esq:"Esquerda",cen:"Centro",dir:"Direita",sc:"Sem classificação"};
-  const tot={cam:{esq:0,cen:0,dir:0,sc:0},sen:{esq:0,cen:0,dir:0,sc:0}};
-  const band=BANDS.map(()=>({cam:0,sen:0,ps:{}})); const unc={cam:0,sen:0,ps:{}};
-  parties.forEach(x=>{ const io=ideoOf(x.p); const sen=x.sen+x.sen22;
-    tot.cam[io.camp]+=x.cam; tot.sen[io.camp]+=sen;
-    const b = io.band<0 ? unc : band[io.band]; b.cam+=x.cam; b.sen+=sen; if(x.cam+sen) b.ps[x.p]=(x.cam+sen); });
+  const camps={esq:"Esquerda",cen:"Centro",ctr:"Centrão",dir:"Direita",sc:"Sem classificação"};
+  const K=["esq","cen","ctr","dir","sc"];
+  const z=()=>({esq:0,cen:0,ctr:0,dir:0,sc:0});
+  const tot={cam:z(),sen:z()}; const ps={esq:{},cen:{},ctr:{},dir:{},sc:{}};
+  parties.forEach(x=>{ const c=campOf(x.p); const sen=x.sen+x.sen22; tot.cam[c]+=x.cam; tot.sen[c]+=sen; if(x.cam+sen) ps[c][x.p]=(ps[c][x.p]||0)+x.cam+sen; });
   const bar=(t,total,maj,label)=>{
     const seg=k=>t[k]?`<i style="width:${100*t[k]/total}%;background:var(--${k})" title="${camps[k]}: ${t[k]}">${100*t[k]/total>=7?t[k]:""}</i>`:"";
-    const lead=["esq","cen","dir"].sort((a,b)=>t[b]-t[a])[0];
-    return `<div class="hd"><b>${label}</b><span>${t[lead]>=maj?`${camps[lead]} tem maioria sozinha (${maj})`:`nenhum campo chega sozinho à maioria (${maj})`}</span></div>
-      <div class="ibar">${seg("esq")}${seg("cen")}${seg("dir")}${seg("sc")}<span class="mid"></span></div>
-      <div class="ilg">${["esq","cen","dir","sc"].filter(k=>t[k]||k!=="sc").map(k=>`<span><i style="background:var(--${k})"></i>${camps[k]} <b>${t[k]}</b> <span style="color:var(--muted)">${fmtPct(100*t[k]/total,0)}</span></span>`).join("")}</div>`;
+    const lead=["esq","cen","ctr","dir"].sort((a,b)=>t[b]-t[a])[0];
+    return `<div class="hd"><b>${label}</b><span>${t[lead]>=maj?`${camps[lead]} tem maioria sozinho (${maj})`:`nenhum grupo tem maioria sozinho (${maj})`}</span></div>
+      <div class="ibar">${K.map(seg).join("")}<span class="mid"></span></div>
+      <div class="ilg">${K.filter(k=>t[k]||k!=="sc").map(k=>`<span><i style="background:var(--${k})"></i>${camps[k]} <b>${t[k]}</b> <span style="color:var(--muted)">${fmtPct(100*t[k]/total,0)}</span></span>`).join("")}</div>`;
   };
   $("ideoCam").innerHTML=bar(tot.cam,513,257,"Câmara · 513");
   $("ideoSen").innerHTML=bar(tot.sen,81,41,"Senado · 81");
-  const ps=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([p])=>esc(p)).join(", ")||"–";
-  $("ideoTab").innerHTML=BANDS.map(([nm,lo,hi,c],i)=>`<tr><td><span class="lead"><i style="background:var(--${c})"></i>${nm}</span></td><td class="num">${lo.toLocaleString("pt-BR")}–${hi.toLocaleString("pt-BR")}</td><td class="num">${band[i].cam}</td><td class="num">${band[i].sen}</td><td>${ps(band[i].ps)}</td></tr>`).join("")
-    + (unc.cam+unc.sen?`<tr><td><span class="lead"><i style="background:var(--sc)"></i>Sem classificação</span></td><td>–</td><td class="num">${unc.cam}</td><td class="num">${unc.sen}</td><td>${ps(unc.ps)}</td></tr>`:"");
+  // o Centrão costuma decidir a maioria: soma com cada lado
+  const combo=(a,b,t,maj)=>{ const n=t[a]+t[b]; return {n,ok:n>=maj}; };
+  const box=(lbl,t,maj,a)=>{ const r=combo(a,"ctr",t,maj); return `<div class="kpi"><div class="k">${lbl}</div><div class="v num">${r.n}</div><div class="s">${r.ok?"forma maioria":"faltam "+(maj-r.n)}</div></div>`; };
+  $("ideoCombo").innerHTML = box("Câmara: esquerda + Centrão",tot.cam,257,"esq")+box("Câmara: direita + Centrão",tot.cam,257,"dir")+box("Senado: esquerda + Centrão",tot.sen,41,"esq")+box("Senado: direita + Centrão",tot.sen,41,"dir");
+  const list=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([p])=>esc(p)).join(", ")||"–";
+  $("ideoTab").innerHTML=K.filter(k=>k!=="sc"||tot.cam.sc+tot.sen.sc).map(k=>`<div class="gr"><span class="sw" style="background:var(--${k})"></span><span class="nm">${camps[k]}</span><span class="n">Câmara <b>${tot.cam[k]}</b></span><span class="n">Senado <b>${tot.sen[k]}</b></span><span class="ps">${list(ps[k])}</span></div>`).join("");
 }
+
 function renderCong(){
   const cg=st.cg; if(!cg) return;
   // ---- Câmara

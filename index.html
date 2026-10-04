@@ -299,7 +299,7 @@ footer a{color:var(--accent)}
       <div class="top"><h2>Senado em 2027</h2><span class="pill wrap">81 cadeiras · 54 em disputa agora (2 por estado) + 27 eleitas em 2022</span></div>
       <div class="hemi" id="senHemi"></div>
       <div class="ptab" id="senTab"></div>
-      <p class="note">Cadeira cheia = em disputa em 2026 (líder atual em cada estado); contorno = mandato de 2022, que vai até 2031, pelo partido da eleição. Trocas de partido desde 2022 não aparecem.</p>
+      <p class="note">Cadeira cheia = em disputa em 2026 (2 mais votados agora em cada estado). Contorno = os 27 eleitos em 2022, com mandato até 2031, pela sigla da eleição: trocas de partido, fusões (o PSC foi incorporado ao Podemos em 2023) e suplentes que assumiram não aparecem.</p>
       <div class="eyebrow" style="margin-top:14px">Disputas mais apertadas pela 2ª vaga</div>
       <div class="rank" id="senClose"></div>
     </section>
@@ -555,6 +555,18 @@ const SP_CARGOS = {gov:3, sen:5, df:6, de:7};
 // ---------- Congresso ----------
 const VAGAS_CAM = {sp:70,mg:53,rj:46,ba:39,rs:31,pr:30,pe:25,ce:22,ma:18,go:17,pa:17,sc:16,pb:12,es:10,pi:10,al:9,am:8,df:8,ms:8,mt:8,rn:8,ro:8,se:8,to:8,ac:8,ap:8,rr:8};
 const UF27 = Object.keys(VAGAS_CAM);
+// eleitos para o Senado em 2022 (1 por UF), sigla pela qual foram eleitos
+const SEN22 = {
+  ac:{nm:"Alan Rick",part:"UNIÃO"}, al:{nm:"Renan Filho",part:"MDB"}, ap:{nm:"Davi Alcolumbre",part:"UNIÃO"},
+  am:{nm:"Omar Aziz",part:"PSD"}, ba:{nm:"Otto Alencar",part:"PSD"}, ce:{nm:"Camilo Santana",part:"PT"},
+  df:{nm:"Damares Alves",part:"REPUBLICANOS"}, es:{nm:"Magno Malta",part:"PL"}, go:{nm:"Wilder Morais",part:"PL"},
+  ma:{nm:"Flávio Dino",part:"PSB"}, mt:{nm:"Wellington Fagundes",part:"PL"}, ms:{nm:"Tereza Cristina",part:"PP"},
+  mg:{nm:"Cleitinho",part:"PSC"}, pa:{nm:"Beto Faro",part:"PT"}, pb:{nm:"Efraim Filho",part:"UNIÃO"},
+  pr:{nm:"Sergio Moro",part:"UNIÃO"}, pe:{nm:"Teresa Leitão",part:"PT"}, pi:{nm:"Wellington Dias",part:"PT"},
+  rj:{nm:"Romário",part:"PL"}, rn:{nm:"Rogério Marinho",part:"PL"}, rs:{nm:"Hamilton Mourão",part:"REPUBLICANOS"},
+  ro:{nm:"Jaime Bagattoli",part:"PL"}, rr:{nm:"Dr. Hiran",part:"PP"}, sc:{nm:"Jorge Seif",part:"PL"},
+  sp:{nm:"Marcos Pontes",part:"PL"}, se:{nm:"Laércio Oliveira",part:"PP"}, to:{nm:"Professora Dorinha",part:"UNIÃO"}
+};
 let variantCg=null;
 async function getRace(uf,cargo){
   const u=vi=>VARIANTS[vi](st.cicloSP,String(st.codSP),uf,String(cargo).padStart(4,"0"));
@@ -573,15 +585,8 @@ async function refreshCong(){
     const res=await Promise.allSettled(part.map(([uf,cg])=>getRace(uf,cg)));
     res.forEach((r,k)=>{ if(r.status!=="fulfilled") return; const [uf,cg]=part[k]; (cg===6?st.cg.cam:st.cg.sen)[uf]=parseResult(r.value); });
   }
-  // senadores eleitos em 2022 (mandato até 2031): lidos uma vez
-  if(!st.cg.sen22){
-    st.cg.sen22={};
-    for(let i=0;i<UF27.length;i+=9){
-      const part=UF27.slice(i,i+9);
-      const res=await Promise.allSettled(part.map(uf=>getJSON(`${BASE}/ele2022/546/dados-simplificados/${uf}/${uf}-c0005-e000546-r.json`)));
-      res.forEach((r,k)=>{ if(r.status!=="fulfilled") return; const d=parseResult(r.value); const w=d.cands.find(c=>c.el)||d.cands.slice().sort((a,b)=>b.v-a.v)[0]; if(w) st.cg.sen22[part[k]]={nm:w.nm,part:w.part}; });
-    }
-  }
+  // senadores eleitos em 2022 (mandato até 2031): resultado fixo, partido na eleição
+  st.cg.sen22 = SEN22;
 }
 function hemicycle(seats, total, rowsN){
   // seats: [{color, stroke?}] já ordenados; desenha semicírculo de pontos
@@ -843,7 +848,7 @@ function startDemo(){
   window.demoMun=(cg)=>{ const h=[...st.mun].reduce((a,c)=>a+c.charCodeAt(0),0); const w=[30+h%9,34-h%7,18,9,4]; const r=maj("Candidato",cg===1?w:[w[1],w[0],18,8,4],10); r.pst=60+h%35; return r; };
   st.sp.capPres=demoMun(1); st.sp.capGov=demoMun(3); renderMunChips();
   // Congresso fictício
-  st.cg={sen:{},cam:{},sen22:{}}; const PP="ABCDEFGHIJKL";
+  st.cg={sen:{},cam:{},sen22:SEN22}; const PP="ABCDEFGHIJKL";
   UF27.forEach(uf=>{
     const vag=VAGAS_CAM[uf], qt=Math.max(30,vag*8); const cs=[];
     for(let i=0;i<qt;i++){ const p="PART-"+PP[Math.min(11,Math.floor(Math.pow(rnd(),1.6)*12))]; cs.push({n:String(1000+i),nm:"Candidato "+(1000+i),part:p,g:p,v:Math.pow(rnd(),3)*(i<4?6:1),p:0,el:false,st:"",dvt:""}); }
@@ -852,7 +857,6 @@ function startDemo(){
     const sc=[...Array(6)].map((_,i)=>({n:String(100+i),nm:"Candidato "+String.fromCharCode(65+i),part:"PART-"+PP[Math.floor(rnd()*8)],v:Math.pow(rnd(),1.5),p:0,el:false,st:"",dvt:""}));
     const ss=sc.reduce((a,c)=>a+c.v,0); sc.forEach(c=>{c.p=100*c.v/ss; c.v=vv*c.v/ss;});
     st.cg.sen[uf]={cands:sc,pst:60+rnd()*38,vv,hg:"exemplo"};
-    st.cg.sen22[uf]={nm:"Senador "+uf.toUpperCase(),part:"PART-"+PP[Math.floor(rnd()*8)]};
   });
   $("bannerCong").hidden=true; renderCong();
   $("bannerSP").hidden=true; renderSP();

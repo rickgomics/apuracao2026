@@ -144,6 +144,13 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 .dp .v{text-align:right;font-size:13px;white-space:nowrap}
 .dp .v small{display:block;color:var(--muted);font-size:11px}
 .dp.cut{border-bottom:2px dashed var(--muted)}
+.prk{display:grid;grid-template-columns:minmax(0,110px) minmax(0,1fr) 92px;gap:2px 10px;align-items:center;padding:5px 0}
+.prk .sg{font:700 15px/1.1 var(--display);overflow-wrap:anywhere}
+.prk .b{height:9px;border-radius:5px;background:var(--surface-2);overflow:hidden}
+.prk .b>i{display:block;height:100%}
+.prk .st{text-align:right;font-size:13px;white-space:nowrap}
+.prk .st b{font-size:16px}
+.prk small{grid-column:2/-1;font-size:11px;color:var(--muted)}
 .verdict{margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--surface-2);font-size:15px}
 .verdict b{font-family:var(--display);font-size:19px;letter-spacing:.01em}
 .ptable{display:flex;flex-direction:column;gap:12px;margin-top:14px}
@@ -211,6 +218,20 @@ footer a{color:var(--accent)}
     </div>
     <section class="panel">
       <div class="top">
+        <div>
+          <div class="eyebrow">Município de São Paulo (capital)</div>
+          <h2><span class="num" id="capPst">–</span> das seções totalizadas na capital</h2>
+        </div>
+      </div>
+      <div class="progress" style="margin-top:10px"><i id="capBar"></i></div>
+      <div class="main" style="margin-top:14px">
+        <div style="min-width:0"><div class="eyebrow">Presidente na capital</div><div class="cands" id="capPres"></div></div>
+        <div style="min-width:0"><div class="eyebrow">Governador na capital</div><div class="cands" id="capGov"></div></div>
+      </div>
+      <p class="note">Compare com o resultado do estado acima: a diferença mostra o peso da capital contra o interior.</p>
+    </section>
+    <section class="panel">
+      <div class="top">
         <h2 id="depTitle">Deputados</h2>
         <div class="seg" role="group" aria-label="Casa legislativa">
           <button type="button" id="dFed" aria-pressed="true">Federal · 70 vagas</button>
@@ -220,9 +241,9 @@ footer a{color:var(--accent)}
       <div class="meta" id="depMeta"></div>
       <div class="main" style="margin-top:12px">
         <div style="min-width:0">
-          <div class="eyebrow">Votos nominais por partido</div>
+          <div class="eyebrow">Cadeiras por partido ou federação</div>
           <div class="rank" id="depPart"></div>
-          <p class="note">Soma dos votos dados aos candidatos de cada partido. Não inclui voto de legenda, então é uma aproximação da força de cada sigla para o quociente partidário.</p>
+          <p class="note" id="depPartNote"></p>
         </div>
         <div style="min-width:0">
           <div class="top">
@@ -230,6 +251,7 @@ footer a{color:var(--accent)}
             <input id="depSearch" type="search" placeholder="Buscar nome, número ou partido" aria-label="Buscar candidato" class="search">
           </div>
           <div class="deplist" id="depList"></div>
+          <div id="depOut"></div>
         </div>
       </div>
     </section>
@@ -349,21 +371,43 @@ const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(
 // ---------- parsing defensivo do JSON simplificado ----------
 // junta todos os candidatos, mesmo quando vêm aninhados por coligação/partido (arquivo unificado -u.json)
 function findCands(o){
-  const out=[], seen=new Set();
-  (function walk(x,sg){
+  const out=[], seen=new Set(), pars=[];
+  (function walk(x,ctx){
     if(!x||typeof x!=="object") return;
-    if(Array.isArray(x)){ x.forEach(e=>walk(e,sg)); return; }
+    if(Array.isArray(x)){ x.forEach(e=>walk(e,ctx)); return; }
     if("vap" in x && (x.nm||x.nmu)){
-      const key=x.sqcand||x.n||x.nm; if(!seen.has(key)){seen.add(key); out.push({...x,_sg:sg});}
+      const key=x.sqcand||x.n||x.nm; if(!seen.has(key)){seen.add(key); out.push({...x,_sg:ctx.sg,_nfed:ctx.nfed,_agr:ctx.agr});}
     }
-    const nsg = (x.sg && !("vap" in x)) ? x.sg : sg;
-    for(const [k,v] of Object.entries(x)) if(k!=="vs" && v && typeof v==="object") walk(v,nsg);
-  })(o,"");
+    let nctx=ctx;
+    if(Array.isArray(x.par)) nctx={...ctx,agr:x.com||x.nm||"",vag:x.vag};
+    if(x.sg && Array.isArray(x.cand) && !("vap" in x)){
+      nctx={...nctx,sg:x.sg,nfed:x.nfed||""};
+      pars.push({sg:x.sg,nfed:x.nfed||"",raw:x});
+    }else if(x.sg && !("vap" in x)) nctx={...nctx,sg:x.sg};
+    for(const [k,v] of Object.entries(x)) if(k!=="vs" && v && typeof v==="object") walk(v,nctx);
+  })(o,{sg:"",nfed:"",agr:""});
+  out._pars=pars;
   return out;
+}
+// mapa de federações (n → sigla) quando o arquivo traz
+function fedMap(j){
+  const m={};
+  (function walk(x){ if(!x||typeof x!=="object") return; if(Array.isArray(x)){x.forEach(walk);return;}
+    if(Array.isArray(x.fed)) x.fed.forEach(f=>{ if(f&&f.n) m[String(f.n)]=f.sg||f.com||f.nm; });
+    Object.values(x).forEach(v=>{ if(v&&typeof v==="object") walk(v); }); })(j);
+  return m;
 }
 function parseResult(j){
   const raw = findCands(j);
+  const fm = fedMap(j);
+  const grp = c => {
+    if(c._nfed && fm[c._nfed]) return "Fed. "+fm[c._nfed];
+    const cc=c.cc||""; const m=cc.match(/Federa[çc][ãa]o[^()]*\(([^)]+)\)/i);
+    if(m) return "Fed. "+m[1].trim();
+    return (cc.split(" - ")[0]||c.sgp||c._sg||"").trim();
+  };
   const cands = raw.map(c=>({
+    g:grp(c),
     n:String(c.n??c.nr??c.sqcand??""),
     nm:(c.nmu||c.nm||c.nmc||("Nº "+(c.n||"?"))).trim(),
     part:(c.cc||c.sgp||c._sg||"").split(" - ")[0].trim(),
@@ -375,8 +419,23 @@ function parseResult(j){
   ["e","v","s"].forEach(k=>{ if(j[k]&&typeof j[k]==="object"&&!Array.isArray(j[k])) Object.assign(flat,j[k]); });
   Object.entries(j).forEach(([k,v])=>{ if(v==null||typeof v!=="object") flat[k]=v; });
   const pick = (...ks)=>{for(const k of ks){if(flat[k]!=null&&flat[k]!=="")return flat[k]}return null};
+  // totais por partido/federação quando o arquivo unificado traz (inclui legenda se houver campo)
+  const pv={}, vag={};
+  (raw._pars||[]).forEach(pr=>{
+    const g = pr.nfed && fm[pr.nfed] ? "Fed. "+fm[pr.nfed] : pr.sg;
+    const nom = (pr.raw.cand||[]).reduce((a,c)=>a+pnum(c.vap),0);
+    let leg=0; for(const k of ["tvl","vl","tvleg","vleg","tvle","vle"]) if(pr.raw[k]!=null){ leg=pnum(pr.raw[k]); break; }
+    const tot = Math.max(nom+leg, pnum(pr.raw.tvtn));
+    pv[g]=(pv[g]||0)+tot;
+  });
+  (function walk(x){ if(!x||typeof x!=="object") return; if(Array.isArray(x)){x.forEach(walk);return;}
+    if(Array.isArray(x.par) && x.vag!=null && pnum(x.vag)>0){
+      const p0=x.par[0]||{}; const g = p0.nfed && fm[p0.nfed] ? "Fed. "+fm[p0.nfed] : (x.par.length===1? p0.sg : (x.com||x.nm));
+      vag[g]=(vag[g]||0)+pnum(x.vag);
+    }
+    Object.values(x).forEach(v=>{ if(v&&typeof v==="object") walk(v); }); })(j);
   return {
-    cands,
+    cands, pv, vag,
     pst:pnum(pick("pst","psa","pesi")),
     vv:pnum(pick("vv","vvc","tvv")) || cands.reduce((a,c)=>a+c.v,0),
     vb:pnum(pick("vb","tvb")), vn:pnum(pick("tvn","vn","vnu")),
@@ -442,6 +501,14 @@ async function refreshSP(){
   st.sp.gov = parseResult(await getSP(SP_CARGOS.gov));
   const rest = await Promise.allSettled(["sen","df","de"].map(k=>getSP(SP_CARGOS[k])));
   ["sen","df","de"].forEach((k,i)=>{ if(rest[i].status==="fulfilled") st.sp[k]=parseResult(rest[i].value); });
+  // capital (código TSE 71072): arquivo unificado por município
+  const mun=(ciclo,cod,cg)=>`${BASE}/${ciclo}/${cod}/dados/sp/sp71072-c${String(cg).padStart(4,"0")}-e${String(cod).padStart(6,"0")}-u.json`;
+  const cap = await Promise.allSettled([
+    st.cod ? getJSON(mun(st.ciclo,st.cod,1)) : Promise.reject(new Error("sem código")),
+    getJSON(mun(st.cicloSP,st.codSP,3))
+  ]);
+  if(cap[0].status==="fulfilled") st.sp.capPres=parseResult(cap[0].value);
+  if(cap[1].status==="fulfilled") st.sp.capGov=parseResult(cap[1].value);
 }
 
 async function getJSON(u){
@@ -563,6 +630,7 @@ function startDemo(){
   const dep=(k,qt,base)=>{const cs=[];for(let i=0;i<qt;i++){const w=Math.pow(rnd(),3)*(i<5?8:1);cs.push({n:String(base+i),nm:"Candidato "+(base+i),part:"PART-"+String.fromCharCode(65+Math.floor(rnd()*9)),v:w,p:0,el:false,st:"",dvt:""});}
     const s=cs.reduce((a,c)=>a+c.v,0);cs.forEach(c=>{c.v=vvSP*.9*c.v/s;c.p=100*c.v/vvSP;});return {cands:cs,pst:80.2,vv:vvSP,e:34.4e6,hg:"exemplo"};};
   st.sp.df=dep("df",400,1000); st.sp.de=dep("de",600,10000);
+  st.sp.capPres=maj("Candidato",[33,36,19,8,4],10); st.sp.capGov=maj("Candidato",[30,40,18,8,4],10); st.sp.capPres.pst=st.sp.capGov.pst=74.5;
   $("bannerSP").hidden=true; renderSP();
   render();
 }
@@ -780,45 +848,106 @@ function renderSP(){
     ].filter(Boolean).map(s=>`<span>${s}</span>`).join("");
   }
   majoritario("spGov", st.sp.gov, 1);
+  majoritario("capPres", st.sp.capPres, 1);
+  majoritario("capGov", st.sp.capGov, 1);
+  const cp=st.sp.capGov||st.sp.capPres;
+  $("capPst").textContent = cp?fmtPct(cp.pst):"–"; $("capBar").style.width=(cp?Math.min(100,cp.pst):0)+"%";
   majoritario("spSen", st.sp.sen, 2);
   renderDep();
+}
+// ---------- distribuição das cadeiras (Código Eleitoral arts. 106–109, Lei 14.211/2021, STF ADIs 7228/7263/7325) ----------
+function allocate(d, vagas){
+  const cs=d.cands.filter(c=>!/anulad|indefer|cassad/i.test(c.dvt)).sort((a,b)=>b.v-a.v);
+  const vv=d.vv||cs.reduce((a,c)=>a+c.v,0);
+  const raw=vv/vagas; const QE = (raw-Math.floor(raw))>0.5 ? Math.ceil(raw) : Math.floor(raw);
+  const G={};
+  cs.forEach(c=>{ const g=c.g||c.part||"?"; (G[g] ||= {g,nom:0,cands:[],seats:0,qp:0,sob:0}); G[g].nom+=c.v; G[g].cands.push(c); });
+  let usedPV=false;
+  Object.values(G).forEach(x=>{ const t=d.pv&&d.pv[x.g]; if(t&&t>x.nom){ x.v=t; usedPV=true; } else x.v=x.nom; });
+  const groups=Object.values(G);
+  const elected=new Map(); // n -> fase
+  if(!QE) return {QE:0,groups,elected,cs,vv,usedPV,next:null};
+  // 1ª fase: quociente partidário, candidato precisa de 10% do QE
+  groups.forEach(x=>{
+    x.qp=Math.floor(x.v/QE);
+    const elig=x.cands.filter(c=>c.v>=0.1*QE).slice(0,x.qp);
+    elig.forEach(c=>elected.set(c.n,"QP")); x.seats=elig.length;
+  });
+  let left=vagas-elected.size, lastM=null;
+  const best=(x,min)=>x.cands.find(c=>!elected.has(c.n)&&c.v>=min);
+  // 2ª fase: sobras pela maior média, partido com 80% do QE e candidato com 20%
+  while(left>0){
+    let pick=null,pm=-1;
+    groups.forEach(x=>{ if(x.v<0.8*QE) return; if(!best(x,0.2*QE)) return; const m=x.v/(x.seats+1); if(m>pm){pm=m;pick=x;} });
+    if(!pick) break;
+    const c=best(pick,0.2*QE); elected.set(c.n,"Média"); pick.seats++; pick.sob++; left--; lastM={g:pick.g,m:pm};
+  }
+  // 3ª fase: todas as legendas e candidatos disputam as vagas restantes pela maior média
+  while(left>0){
+    let pick=null,pm=-1;
+    groups.forEach(x=>{ if(!best(x,0)) return; const m=x.v/(x.seats+1); if(m>pm){pm=m;pick=x;} });
+    if(!pick) break;
+    const c=best(pick,0); elected.set(c.n,"Média 3ª fase"); pick.seats++; pick.sob++; left--; lastM={g:pick.g,m:pm};
+  }
+  // quem levaria a próxima vaga (para ver a disputa da última cadeira)
+  let next=null,nm=-1;
+  groups.forEach(x=>{ if(!best(x,0)) return; const m=x.v/(x.seats+1); if(m>nm){nm=m;next={g:x.g,m,c:best(x,0)};} });
+  return {QE,groups,elected,cs,vv,usedPV,next,lastM};
 }
 function renderDep(){
   const fed = st.dep==="df"; const d = st.sp[st.dep]; const vagas = fed?70:94;
   $("dFed").setAttribute("aria-pressed",fed); $("dEst").setAttribute("aria-pressed",!fed);
   $("depTitle").textContent = fed?"Deputados federais":"Deputados estaduais";
   if(!d||!d.cands.length){
-    $("depPart").innerHTML=""; $("depMeta").innerHTML="";
+    $("depPart").innerHTML=""; $("depMeta").innerHTML=""; $("depOut").innerHTML="";
     $("depList").innerHTML='<p class="note">Aguardando o primeiro arquivo do TSE para este cargo.</p>'; return;
   }
-  const cs=d.cands.filter(c=>!/anulad|indefer|cassad/i.test(c.dvt)).sort((a,b)=>b.v-a.v);
-  const nom = cs.reduce((a,c)=>a+c.v,0)||1;
-  const eleitos = cs.filter(c=>c.el).length;
+  const A=allocate(d,vagas);
+  const offN = A.cs.filter(c=>c.el).length;
+  const official = offN>=vagas*0.95;
+  const isEl = c => official ? c.el : A.elected.has(c.n);
+  const how = c => official ? (c.st||"Eleito") : A.elected.get(c.n);
   $("depMeta").innerHTML=[
     `Apurado: <b class="num">${fmtPct(d.pst)}</b>`,
-    `Votos válidos: <b class="num">${fmtInt(d.vv)}</b>`,
-    d.vv?`Quociente eleitoral estimado: <b class="num">${fmtInt(d.vv/vagas)}</b>`:"",
-    eleitos?`Eleitos definidos: <b class="num">${eleitos}</b> de ${vagas}`:""
-  ].filter(Boolean).map(s=>`<span>${s}</span>`).join("");
-  // partidos
-  const byP={}; cs.forEach(c=>{const p=c.part||"Sem partido"; (byP[p] ||= {v:0,n:0,el:0}); byP[p].v+=c.v; byP[p].n++; if(c.el) byP[p].el++;});
-  const parts=Object.entries(byP).sort((a,b)=>b[1].v-a[1].v);
-  const max=parts[0]?.[1].v||1;
-  $("depPart").innerHTML=parts.slice(0,14).map(([p,x])=>`<div class="rk" style="grid-template-columns:minmax(70px,auto) minmax(0,1fr) auto">
-      <span class="uf" style="font-size:14px">${esc(p)}</span>
-      <span class="b"><i style="width:${100*x.v/max}%;background:var(--accent)"></i></span>
-      <span class="v num">${fmtPct(100*x.v/nom,1)} · ${fmtK(x.v)}<small>${x.n} candidatos${x.el?` · ${x.el} eleitos`:""}</small></span></div>`).join("")
-    + (parts.length>14?`<div class="note">Outros ${parts.length-14} partidos somam ${fmtPct(100*parts.slice(14).reduce((a,[,x])=>a+x.v,0)/nom,1)}.</div>`:"");
+    `Votos válidos: <b class="num">${fmtInt(A.vv)}</b>`,
+    `Quociente eleitoral: <b class="num">${fmtInt(A.QE)}</b> votos`,
+    `Mínimo por candidato: <b class="num">${fmtInt(Math.ceil(A.QE*0.1))}</b> (10%) · sobras <b class="num">${fmtInt(Math.ceil(A.QE*0.2))}</b> (20%)`,
+    official?`<b>Eleitos oficiais do TSE</b>`:`Simulação com o apurado agora`
+  ].map(s=>`<span>${s}</span>`).join("");
+  // partidos/federações
+  const groups=A.groups.filter(x=>x.v>0).sort((a,b)=>b.seats-a.seats||b.v-a.v);
+  const max=Math.max(...groups.map(x=>x.v))||1;
+  const offVag = d.vag && Object.keys(d.vag).length ? d.vag : null;
+  $("depPart").innerHTML=groups.slice(0,18).map(x=>{
+    const seats = official ? x.cands.filter(c=>c.el).length : x.seats;
+    const qeShare = x.v/A.QE;
+    return `<div class="prk">
+      <span class="sg">${esc(x.g)}</span>
+      <span class="b"><i style="width:${100*x.v/max}%;background:${seats?"var(--accent)":"var(--c9)"}"></i></span>
+      <span class="st num"><b>${seats}</b> ${seats===1?"cadeira":"cadeiras"}</span>
+      <small class="num">${fmtK(x.v)} votos · ${qeShare.toLocaleString("pt-BR",{maximumFractionDigits:2})} QE${!official&&x.sob?` · ${x.qp} QP + ${x.sob} média`:""}${offVag&&offVag[x.g]!=null?` · TSE: ${offVag[x.g]}`:""}</small></div>`;}).join("")
+    + (groups.length>18?`<div class="note">Outras ${groups.length-18} siglas sem cadeira na simulação.</div>`:"")
+    + (A.next&&!official?`<div class="note">Próxima vaga, se houvesse: <b>${esc(A.next.g)}</b> (média ${fmtInt(A.next.m)}), com ${esc(A.next.c.nm)}.</div>`:"");
+  $("depPartNote").textContent = A.usedPV
+    ? "Votos por sigla = nominais + legenda, como vêm no arquivo do TSE. Federação conta como um partido só."
+    : "O arquivo do TSE não trouxe o voto de legenda separado por sigla; a simulação usa só os votos nominais de cada partido/federação. O quociente eleitoral usa todos os válidos (com legenda), então ele está correto, mas a divisão entre siglas pode variar algumas cadeiras.";
   // lista
   const q=st.depQ.trim().toLowerCase();
-  const ranked=cs.map((c,i)=>({...c,pos:i+1}));
-  const list = q ? ranked.filter(c=>(c.nm+" "+c.n+" "+c.part).toLowerCase().includes(q)).slice(0,100) : ranked.slice(0,vagas);
-  $("depListTitle").textContent = q ? `${list.length} resultado(s) para "${st.depQ.trim()}"` : `${vagas} mais votados (tamanho da bancada)`;
+  const ranked=A.cs.map((c,i)=>({...c,pos:i+1}));
+  let list, title;
+  if(q){ list=ranked.filter(c=>(c.nm+" "+c.n+" "+c.part+" "+c.g).toLowerCase().includes(q)).slice(0,100); title=`${list.length} resultado(s) para "${st.depQ.trim()}"`; }
+  else { list=ranked.filter(isEl); title=`${list.length} eleitos ${official?"(TSE)":"na simulação"}`; }
+  $("depListTitle").textContent=title;
   $("depList").innerHTML = list.length ? list.map(c=>`<div class="dp">
       <span class="pos">${c.pos}º</span>
-      <span class="nm">${esc(c.nm)} <small>${esc(c.n)} · ${esc(c.part)}</small>${c.el?statusTag(c)||'<span class="tag">Eleito</span>':""}</span>
+      <span class="nm">${esc(c.nm)} <small>${esc(c.n)} · ${esc(c.g||c.part)}</small>${isEl(c)?`<span class="tag">${esc(how(c))}</span>`:'<span class="tag muted">fora</span>'}</span>
       <span class="v num">${fmtInt(c.v)}<small>${fmtPct(c.p)}</small></span></div>`).join("")
     : '<p class="note">Nenhum candidato encontrado.</p>';
+  // efeito do quociente: bem votados que ficam fora
+  const out=ranked.slice(0,vagas).filter(c=>!isEl(c));
+  $("depOut").innerHTML = out.length ? `<div class="eyebrow" style="margin-top:14px">Entre os ${vagas} mais votados, ficariam de fora</div>`+out.map(c=>`<div class="dp">
+      <span class="pos">${c.pos}º</span><span class="nm">${esc(c.nm)} <small>${esc(c.g||c.part)}</small></span><span class="v num">${fmtInt(c.v)}</span></div>`).join("")
+      + `<p class="note">Ficam fora porque a sigla não fez votos suficientes para mais uma cadeira. Em troca, entram candidatos com menos votos de siglas mais fortes.</p>` : "";
 }
 // cada disputa vive na sua pasta: raiz = Presidente, /sp = São Paulo
 if(PAGE==="pres" && location.hash==="#sp") location.replace("sp/");

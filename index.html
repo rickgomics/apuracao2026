@@ -238,27 +238,33 @@ const fmtK = n => n>=1e6 ? (n/1e6).toLocaleString("pt-BR",{maximumFractionDigits
 const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 // ---------- parsing defensivo do JSON simplificado ----------
+// junta todos os candidatos, mesmo quando vêm aninhados por coligação/partido (arquivo unificado -u.json)
 function findCands(o){
-  let best=null;
-  (function walk(x){
+  const out=[], seen=new Set();
+  (function walk(x,sg){
     if(!x||typeof x!=="object") return;
-    if(Array.isArray(x)){
-      if(x.length && x.every(e=>e&&typeof e==="object") && x.some(e=>"vap" in e)){ if(!best||x.length>best.length) best=x; }
-      x.forEach(walk); return;
+    if(Array.isArray(x)){ x.forEach(e=>walk(e,sg)); return; }
+    if("vap" in x && (x.nm||x.nmu)){
+      const key=x.sqcand||x.n||x.nm; if(!seen.has(key)){seen.add(key); out.push({...x,_sg:sg});}
     }
-    Object.values(x).forEach(walk);
-  })(o);
-  return best||[];
+    const nsg = (x.sg && !("vap" in x)) ? x.sg : sg;
+    for(const [k,v] of Object.entries(x)) if(k!=="vs" && v && typeof v==="object") walk(v,nsg);
+  })(o,"");
+  return out;
 }
 function parseResult(j){
   const raw = findCands(j);
   const cands = raw.map(c=>({
     n:String(c.n??c.nr??c.sqcand??""),
-    nm:(c.nm||c.nmu||c.nmc||("Nº "+(c.n||"?"))).trim(),
-    part:(c.cc||c.sgp||"").split(" - ")[0].trim(),
+    nm:(c.nmu||c.nm||c.nmc||("Nº "+(c.n||"?"))).trim(),
+    part:(c.cc||c.sgp||c._sg||"").split(" - ")[0].trim(),
     v:pnum(c.vap??c.v), p:pnum(c.pvap??c.pv)
   })).filter(c=>c.nm);
-  const pick = (...ks)=>{for(const k of ks){if(j[k]!=null&&j[k]!=="")return j[k]}return null};
+  // achata os blocos s (seções), e (eleitorado) e v (votos) do formato unificado
+  const flat = {};
+  ["e","v","s"].forEach(k=>{ if(j[k]&&typeof j[k]==="object"&&!Array.isArray(j[k])) Object.assign(flat,j[k]); });
+  Object.entries(j).forEach(([k,v])=>{ if(v==null||typeof v!=="object") flat[k]=v; });
+  const pick = (...ks)=>{for(const k of ks){if(flat[k]!=null&&flat[k]!=="")return flat[k]}return null};
   return {
     cands,
     pst:pnum(pick("pst","psa","pesi")),
@@ -274,32 +280,60 @@ async function loadConfig(){
   const r = await fetch(BASE+"/comum/config/ele-c.json",{cache:"no-store"});
   if(!r.ok) throw new Error("config HTTP "+r.status);
   const j = await r.json();
-  const ciclo = j.c || j.ciclo || "";
   const list=[];
   (j.pl||[]).forEach(pl=>(pl.e||[]).forEach(e=>{
-    const s=JSON.stringify(e);
-    const pres = /"ds":"Presidente"/i.test(s) || /"cd":"?0*1"?,"ds"/.test(s) || /Federal/i.test(e.nm||"");
-    list.push({cd:String(e.cd), nm:e.nm||("Eleição "+e.cd), t:String(e.t||e.tp||""), dt:pl.dt||e.dt||"", pres});
+    const dt = pl.dt||e.dt||"";
+    const ano = /\d{4}$/.test(dt) ? dt.slice(-4) : "";
+    // o campo "c" do config pode ficar desatualizado; o ciclo vem do ano do pleito
+    const ciclo = ano ? "ele"+ano : (j.c||"");
+    const pres = (e.abr||[]).some(a=>(a.cp||[]).some(c=>String(c.cd)==="1"));
+    const [d,m,y] = dt.split("/").map(Number);
+    const dist = y ? Math.abs(new Date(y,m-1,d) - new Date()) : 9e15;
+    list.push({cd:String(e.cd), nm:(e.nm||("Eleição "+e.cd)).replace(/&#186;/g,"º"), t:String(e.t||""), dt, ciclo, pres, dist});
   }));
   st.elections = list;
   const sel=$("selEle"); sel.innerHTML="";
-  list.forEach(e=>{const o=document.createElement("option");o.value=e.cd;o.textContent=`${e.cd} · ${e.nm}${e.t?" · "+e.t+"º turno":""}${e.dt?" · "+e.dt:""}`;sel.appendChild(o)});
-  if(!st.ciclo) st.ciclo = ciclo;
+  list.filter(e=>e.pres).concat(list.filter(e=>!e.pres)).forEach(e=>{const o=document.createElement("option");o.value=e.cd;o.textContent=`${e.cd} · ${e.nm}${e.dt?" · "+e.dt:""}`;sel.appendChild(o)});
   if(!st.cod){
-    const cand = list.filter(e=>e.pres);
-    const first = cand.find(e=>e.t==="1") || cand[0] || list[0];
-    if(first) st.cod = first.cd;
+    const pres = list.filter(e=>e.pres).sort((a,b)=>a.dist-b.dist);
+    const first = pres[0];
+    if(!first) throw new Error("o TSE ainda não listou a eleição presidencial no arquivo de configuração");
+    st.cod = first.cd; st.ciclo = first.ciclo;
+  }else if(!st.ciclo){
+    st.ciclo = list.find(e=>e.cd===st.cod)?.ciclo || "ele2026";
   }
   sel.value = st.cod;
   $("inCiclo").value=st.ciclo; $("inCod").value=st.cod;
 }
 
-const urlFor = uf => `${BASE}/${st.ciclo}/${st.cod}/dados-simplificados/${uf}/${uf}-c0001-e${String(st.cod).padStart(6,"0")}-r.json`;
+// 2026 pode publicar o resultado por UF no formato simplificado (-r) ou no unificado (-u); testa os dois
+const VARIANTS = [
+  (uf,cod)=>`${BASE}/${st.ciclo}/${cod}/dados-simplificados/${uf}/${uf}-c0001-e${cod.padStart(6,"0")}-r.json`,
+  (uf,cod)=>`${BASE}/${st.ciclo}/${cod}/dados/${uf}/${uf}-c0001-e${cod.padStart(6,"0")}-u.json`
+];
+let variant = null;
+const urlFor = (uf,vi) => VARIANTS[vi ?? variant ?? 0](uf,String(st.cod));
 
 async function getJSON(u){
   const r = await fetch(u,{cache:"no-store"});
-  if(!r.ok) throw new Error("HTTP "+r.status);
+  if(!r.ok) { const e=new Error("HTTP "+r.status); e.url=u; throw e; }
   return r.json();
+}
+async function getUF(uf){
+  if(variant!=null) return getJSON(urlFor(uf));
+  let last;
+  for(let i=0;i<VARIANTS.length;i++){
+    try{ const j=await getJSON(urlFor(uf,i)); variant=i; return j; }catch(e){ last=e; }
+  }
+  throw last;
+}
+function sumUFs(){
+  const ufs=Object.values(st.uf); if(!ufs.length) return null;
+  const by={}; let vv=0,vb=0,vn=0,e=0,c=0,a=0,pstW=0;
+  ufs.forEach(d=>{ d.cands.forEach(x=>{ (by[x.n] ||= {...x,v:0}).v += x.v; vv+=x.v; }); vb+=d.vb; vn+=d.vn; e+=d.e; c+=d.c; a+=d.a; pstW+=d.pst*(d.e||1); });
+  const cands=Object.values(by).map(x=>({...x,p:vv?100*x.v/vv:0}));
+  const hg = ufs.map(d=>d.hg).filter(Boolean).sort().pop()||"";
+  return {cands,pst:e?pstW/e:0,vv,vb,vn,e,c,pc:e?100*c/e:0,a,pa:e?100*a/e:0,hg,somado:true};
 }
 
 async function refresh(){
@@ -307,14 +341,20 @@ async function refresh(){
   st.busy=true; setStatus("Buscando dados…","");
   try{
     if(!st.ciclo||!st.cod) await loadConfig();
-    $("srcUrl").textContent = "Arquivo nacional: "+urlFor("br");
-    st.br = parseResult(await getJSON(urlFor("br")));
-    // estados em lotes de 7 para não disparar 28 requisições de uma vez
-    for(let i=0;i<UFS.length;i+=7){
-      const part = UFS.slice(i,i+7);
+    // SP primeiro para descobrir o formato do arquivo; depois os demais em lotes de 7
+    let firstErr=null;
+    try{ st.uf.sp = parseResult(await getUF("sp")); }catch(e){ firstErr=e; }
+    if(variant==null) throw firstErr || new Error("arquivo não encontrado");
+    const rest = UFS.filter(u=>u!=="sp");
+    for(let i=0;i<rest.length;i+=7){
+      const part = rest.slice(i,i+7);
       const res = await Promise.allSettled(part.map(uf=>getJSON(urlFor(uf))));
       res.forEach((r,k)=>{ if(r.status==="fulfilled") st.uf[part[k]] = parseResult(r.value); });
     }
+    let br=null;
+    try{ br = parseResult(await getJSON(urlFor("br"))); if(!br.cands.length) br=null; }catch(e){}
+    st.br = br || sumUFs();
+    $("srcUrl").textContent = "Arquivo usado (SP): "+urlFor("sp")+(st.br.somado?" · total nacional = soma dos estados":"");
     hideBanner();
     setStatus("Ao vivo","live");
     render();
@@ -323,7 +363,7 @@ async function refresh(){
     showBanner("err","Não consegui ler os dados do TSE",
       (location.protocol==="file:"||/Failed to fetch|NetworkError|Load failed/i.test(err.message)
         ? "O navegador bloqueou a leitura direta (rede ou política de acesso do site). Abra este arquivo no Chrome ou Safari de um computador conectado, ou peça para publicar numa página. Enquanto isso, dá para explorar com dados de exemplo."
-        : "Detalhe: "+err.message+". Confira o ciclo e o código da eleição em Configuração (o TSE só publica os códigos de 2026 perto da votação).")
+        : "Detalhe: "+esc(err.message)+(err.url?" em <span class=\"num\" style=\"overflow-wrap:anywhere\">"+esc(err.url)+"</span>":"")+`. Ciclo usado: <b>${esc(st.ciclo||"–")}</b>, código: <b>${esc(st.cod||"–")}</b>. Se o 1º turno ainda não começou a ser divulgado, o TSE pode não ter publicado os arquivos; o painel tenta de novo sozinho.`)
       + ' <button class="btn" type="button" id="bDemo2" style="margin-top:8px">Ver com dados de exemplo</button>');
     const b=$("bDemo2"); if(b) b.onclick=startDemo;
     if(!st.br) render();
@@ -501,7 +541,7 @@ $("selEle").onchange=e=>{$("inCod").value=e.target.value};
 $("btnApply").onclick=()=>{
   st.ciclo=$("inCiclo").value.trim(); st.cod=$("inCod").value.trim(); st.interval=Math.max(45,+$("inInt").value||90);
   store.set("ap_ciclo",st.ciclo); store.set("ap_cod",st.cod); store.set("ap_int",String(st.interval));
-  st.demo=false; st.br=null; st.uf={}; hideBanner(); refresh();
+  variant=null; st.demo=false; st.br=null; st.uf={}; hideBanner(); refresh();
 };
 $("inInt").value=Math.max(45,st.interval);
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",render);

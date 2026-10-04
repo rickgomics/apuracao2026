@@ -610,11 +610,11 @@ function renderRank(cs){
   const rows = UFS.map(uf=>({uf,c:ufCand(uf,c.n),pst:st.uf[uf]?.pst||0})).filter(r=>r.c).sort((a,b)=>b.c.v-a.c.v);
   const tot = rows.reduce((a,r)=>a+r.c.v,0)||1; const max = rows[0]?.c.v||1;
   const color=colorOf(c.n);
-  $("rank").innerHTML = rows.slice(0,15).map(r=>`<div class="rk">
+  $("rank").innerHTML = rows.map(r=>`<div class="rk">
      <span class="uf">${r.uf.toUpperCase()}</span>
      <span class="b"><i style="width:${100*r.c.v/max}%;background:${color}"></i></span>
      <span class="v num">${fmtPct(100*r.c.v/tot,1)} · ${fmtK(r.c.v)}<small>${fmtPct(r.c.p,1)} no estado · ${fmtPct(r.pst,0)} apurado</small></span></div>`).join("")
-    + (rows.length>15?`<div class="note">Outras ${rows.length-15} UFs somam ${fmtPct(100*rows.slice(15).reduce((a,r)=>a+r.c.v,0)/tot,1)} dos votos.</div>`:"");
+    + (rows.length<UFS.length?`<div class="note">${UFS.length-rows.length} UF(s) ainda sem arquivo publicado pelo TSE.</div>`:"");
 }
 
 function renderRegions(cs){

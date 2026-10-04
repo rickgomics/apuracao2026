@@ -144,6 +144,23 @@ details.cfg summary{cursor:pointer;font-weight:600;font-size:14px}
 .dp .v{text-align:right;font-size:13px;white-space:nowrap}
 .dp .v small{display:block;color:var(--muted);font-size:11px}
 .dp.cut{border-bottom:2px dashed var(--muted)}
+.verdict{margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--surface-2);font-size:15px}
+.verdict b{font-family:var(--display);font-size:19px;letter-spacing:.01em}
+.ptable{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+.prow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:baseline}
+.prow .nm{font-weight:600;overflow-wrap:anywhere}
+.prow .pp{font:600 22px/1 var(--display);text-align:right}
+.prow .pp small{display:block;font:400 12px/1.3 var(--body);color:var(--muted);margin-top:3px}
+.pbar{grid-column:1/-1;position:relative;height:12px;border-radius:6px;background:var(--surface-2);overflow:hidden}
+.pbar i{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+.pbar i.now{opacity:1}
+.pbar i.proj{opacity:.35}
+.pbar .half{position:absolute;left:50%;top:-2px;bottom:-2px;border-left:2px dashed var(--fg);opacity:.5}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:16px}
+.kpi{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+.kpi .k{font:600 11px/1.2 var(--body);text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.kpi .v{font:600 24px/1.1 var(--display);margin-top:4px}
+.kpi .s{font-size:12px;color:var(--muted)}
 footer{font-size:12px;color:var(--muted)}
 footer a{color:var(--accent)}
 </style>
@@ -232,6 +249,22 @@ footer a{color:var(--accent)}
     <div class="meta" id="meta"></div>
   </section>
 
+  <section class="panel" id="projPanel">
+    <div class="top">
+      <div>
+        <div class="eyebrow">Estimativa não oficial</div>
+        <h2>Projeção para 100% das urnas</h2>
+      </div>
+      <span class="pill wrap">Se o que falta em cada estado votar como o já apurado ali</span>
+    </div>
+    <div class="verdict" id="projVerdict"></div>
+    <div class="ptable" id="projCands"></div>
+    <div class="kpis" id="projKpis"></div>
+    <div class="eyebrow" style="margin-top:16px">Onde estão os votos que faltam apurar</div>
+    <div class="rank" id="projLeft"></div>
+    <p class="note" id="projNote">O modelo não sabe quais cidades de cada estado ainda faltam. Se as que faltam votarem diferente das já apuradas (capital × interior, por exemplo), o resultado final muda. Quanto menor o % apurado, maior a incerteza.</p>
+  </section>
+
   <div class="main">
     <section class="panel">
       <div class="top">
@@ -288,7 +321,7 @@ footer a{color:var(--accent)}
     </details>
   </section>
 
-  <footer>Fonte: arquivos públicos de divulgação do TSE (<a href="https://resultados.tse.jus.br" target="_blank" rel="noopener">resultados.tse.jus.br</a>). Só números oficiais, sem projeção. Intervalo mínimo de 45 s para não sobrecarregar o servidor.</footer>
+  <footer>Fonte: arquivos públicos de divulgação do TSE (<a href="https://resultados.tse.jus.br" target="_blank" rel="noopener">resultados.tse.jus.br</a>). Números oficiais; a projeção é uma estimativa simples feita neste painel, não do TSE. Intervalo mínimo de 45 s para não sobrecarregar o servidor.</footer>
 </div>
 
 <script>
@@ -573,7 +606,7 @@ function render(){
   $("chips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{st.cand=b.dataset.n; if(st.mode==="lead") setMode("cand"); else render();});
   $("chips").style.display = st.mode==="cand" ? "" : "none";
 
-  renderMap(cs); renderRank(cs); renderRegions(cs); renderTable(cs);
+  renderProj(cs); renderMap(cs); renderRank(cs); renderRegions(cs); renderTable(cs);
 }
 
 function ufCand(uf,n){ return st.uf[uf]?.cands.find(c=>c.n===n); }
@@ -604,6 +637,68 @@ function renderMap(cs){
     const c=colorOf(st.cand);
     lg.innerHTML=`<span class="num">0%</span><span class="ramp" style="background:linear-gradient(90deg,${mix(c,.12)},${c})"></span><span class="num">${fmtPct(maxP,0)}</span>`;
   }
+}
+
+// ---------- projeção ----------
+function project(cs){
+  const ufs=UFS.filter(u=>st.uf[u]&&st.uf[u].cands.length);
+  const nat=st.br; const natComp = nat&&nat.pc ? nat.pc/100 : 0.79;
+  const out={by:{}, comp:0, e:0, vv:0, vvNow:0, left:[], missing:UFS.length-ufs.length};
+  ufs.forEach(uf=>{
+    const d=st.uf[uf]; const sv=d.cands.reduce((a,c)=>a+c.v,0); if(!sv) return;
+    let compP, vvP;
+    if(d.e>0 && d.pc>0 && d.c>0){
+      // comparecimento observado no estado aplicado ao eleitorado inteiro
+      compP = d.e*d.pc/100; vvP = compP*(sv/d.c);
+    }else if(d.pst>0){
+      vvP = sv/(d.pst/100); compP = d.c ? d.c/(d.pst/100) : vvP/0.95;
+    }else return;
+    vvP=Math.max(vvP,sv);
+    d.cands.forEach(c=>{ (out.by[c.n] ||= {n:c.n,nm:c.nm,part:c.part,v:0}).v += vvP*c.v/sv; });
+    out.comp+=compP; out.e+=(d.e||compP/natComp); out.vv+=vvP; out.vvNow+=sv;
+    const s=d.cands.slice().sort((a,b)=>b.v-a.v);
+    out.left.push({uf,left:vvP-sv,pst:d.pst,lead:s[0],second:s[1],sv});
+  });
+  out.cands=Object.values(out.by).map(x=>({...x,p:out.vv?100*x.v/out.vv:0})).sort((a,b)=>b.v-a.v);
+  out.left.sort((a,b)=>b.left-a.left);
+  return out;
+}
+function renderProj(cs){
+  const pr=project(cs); const br=st.br;
+  if(!pr.cands.length){ $("projVerdict").textContent="Aguardando dados dos estados."; $("projCands").innerHTML=$("projKpis").innerHTML=$("projLeft").innerHTML=""; return; }
+  if(br && br.pst>=99.99){ $("projVerdict").innerHTML="<b>Apuração encerrada.</b> A projeção coincide com o resultado oficial."; }
+  else{
+    const [a,b]=pr.cands;
+    $("projVerdict").innerHTML = a.p>50
+      ? `Pela projeção, <b>${esc(a.nm)}</b> terminaria com <b class="num">${fmtPct(a.p,1)}</b> dos válidos: acima de 50%, <b>venceria no 1º turno</b>.`
+      : `Pela projeção, ninguém passa de 50% dos válidos: <b>2º turno entre ${esc(a.nm)} (${fmtPct(a.p,1)}) e ${esc(b?.nm||"–")} (${fmtPct(b?.p||0,1)})</b>.`;
+  }
+  const nowP = n => cs.find(c=>c.n===n)?.p||0;
+  $("projCands").innerHTML = pr.cands.slice(0,6).map(c=>{const now=nowP(c.n), d=c.p-now, col=colorOf(c.n);
+    return `<div class="prow">
+      <span class="nm">${esc(c.nm)}</span>
+      <span class="pp num">${fmtPct(c.p,1)}<small>agora ${fmtPct(now,1)} · ${Math.abs(d)<0.05?"0,0":(d>0?"+":"")+d.toLocaleString("pt-BR",{maximumFractionDigits:1,minimumFractionDigits:1})} p.p.</small></span>
+      <span class="pbar"><i class="proj" style="width:${Math.min(100,c.p)}%;background:${col}"></i><i class="now" style="width:${Math.min(100,now)}%;background:${col}"></i><span class="half"></span></span>
+      <span class="vt num" style="grid-column:1/-1;font-size:12px;color:var(--muted)">≈ ${fmtInt(c.v)} votos no final</span></div>`;}).join("")
+    + `<p class="note">Barra cheia = apurado agora. Faixa clara = projeção final. Tracejado = 50% dos válidos.</p>`;
+  const a=pr.cands[0], b=pr.cands[1];
+  const abst = pr.e ? 100*(1-pr.comp/pr.e) : 0;
+  $("projKpis").innerHTML = [
+    ["Abstenção projetada", fmtPct(abst,1), br&&br.pa?`agora ${fmtPct(br.pa,1)}`:""],
+    ["Comparecimento", fmtK(pr.comp), `de ${fmtK(pr.e)} eleitores`],
+    ["Votos válidos no final", fmtK(pr.vv), `${fmtK(Math.max(0,pr.vv-pr.vvNow))} ainda por apurar`],
+    b?["Diferença 1º–2º", fmtK(a.v-b.v), `${(a.p-b.p).toLocaleString("pt-BR",{maximumFractionDigits:1})} p.p.`]:null
+  ].filter(Boolean).map(([k,v,s])=>`<div class="kpi"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`).join("");
+  const maxL=pr.left[0]?.left||1, totL=pr.left.reduce((x,r)=>x+Math.max(0,r.left),0)||1;
+  const rows=pr.left.filter(r=>r.left>0);
+  $("projLeft").innerHTML = rows.length ? rows.slice(0,10).map(r=>`<div class="rk">
+     <span class="uf">${r.uf.toUpperCase()}</span>
+     <span class="b"><i style="width:${100*r.left/maxL}%;background:${r.lead?colorOf(r.lead.n):"var(--c9)"}"></i></span>
+     <span class="v num">${fmtK(r.left)} · ${fmtPct(100*r.left/totL,0)}<small>${fmtPct(r.pst,0)} apurado · lidera ${esc(r.lead?.nm||"–")}</small></span></div>`).join("")
+     + (rows.length>10?`<div class="note">Outras ${rows.length-10} UFs somam ${fmtPct(100*rows.slice(10).reduce((x,r)=>x+r.left,0)/totL,0)} do que falta.</div>`:"")
+    : '<p class="note">Nada a apurar.</p>';
+  const pn=$("projNote"); pn.dataset.base ||= pn.textContent;
+  pn.textContent = pn.dataset.base + (pr.missing?` ${pr.missing} UF(s) ainda sem dados ficaram fora da projeção.`:"");
 }
 
 function renderRank(cs){
